@@ -36,7 +36,7 @@ npm install
 npm run dev
 ```
 
-Frontend: `http://localhost:6000`  
+Frontend: `http://localhost:6001`  
 Backend: `http://localhost:4000/api`
 
 Open Admin in NicFlix to add your media folders and scan them.
