@@ -10,7 +10,7 @@ const defaultConfig = {
   libraries: [],
   tmdbApiKeyEncrypted: "",
   tmdbDisconnected: false,
-  autoSkipEnabled: true,
+  autoSkipEnabled: false,
   autoPlayNextEnabled: true
 };
 
@@ -26,7 +26,7 @@ function readRawConfig() {
     tmdbApiKeyEncrypted: typeof parsed.tmdbApiKeyEncrypted === "string" ? parsed.tmdbApiKeyEncrypted : "",
     tmdbApiKey: typeof parsed.tmdbApiKey === "string" ? parsed.tmdbApiKey : "",
     tmdbDisconnected: parsed.tmdbDisconnected === true,
-    autoSkipEnabled: parsed.autoSkipEnabled !== false,
+    autoSkipEnabled: parsed.autoSkipEnabled === true,
     autoPlayNextEnabled: parsed.autoPlayNextEnabled !== false
   };
 }

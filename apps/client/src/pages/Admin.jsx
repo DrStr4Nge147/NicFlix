@@ -372,7 +372,7 @@ export default function Admin() {
               onChange={(e) => togglePlayerSetting("autoSkipEnabled", e.target.checked)}
             />
             <div>
-              <strong>Enable "Skip Intro / Outro"</strong>
+              <strong>Enable "Skip Intro / Outro" (Experimental)</strong>
               <p className="muted">Fetches segment timing from IntroDB and shows a skip button during playback.</p>
             </div>
           </label>
