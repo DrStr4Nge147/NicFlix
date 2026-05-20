@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set PORTS=4000 5173
+set PORTS=4000 6000
 
 echo Stopping NicFlix ports...
 echo.

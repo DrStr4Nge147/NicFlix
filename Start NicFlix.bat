@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 echo Starting NicFlix...
 echo.
-echo Frontend: http://localhost:5173
+echo Frontend: http://localhost:6000
 echo Backend:  http://localhost:4000/api
 echo.
 echo Leave this window open while using NicFlix.
