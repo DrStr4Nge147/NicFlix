@@ -46,6 +46,7 @@ export default function Admin() {
   const [browser, setBrowser] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const mounted = useRef(false);
+  const backdropPointerStartedOutside = useRef(false);
   const { task: bulkTmdb, startBulkTmdb, scanTask, startScan } = useBulkTmdb();
 
   async function load() {
@@ -106,6 +107,17 @@ export default function Admin() {
 
   function askForConfirmation(options) {
     setConfirmDialog(options);
+  }
+
+  function trackBackdropPointerDown(event) {
+    backdropPointerStartedOutside.current = event.target === event.currentTarget;
+  }
+
+  function closeOnBackdropClick(event, close) {
+    if (event.target === event.currentTarget && backdropPointerStartedOutside.current) {
+      close();
+    }
+    backdropPointerStartedOutside.current = false;
   }
 
   async function deleteLibrary(library) {
@@ -638,7 +650,11 @@ export default function Admin() {
       </main>
 
       {editing ? (
-        <div className="modal-backdrop" onClick={() => setEditing(null)}>
+        <div
+          className="modal-backdrop"
+          onPointerDown={trackBackdropPointerDown}
+          onClick={(event) => closeOnBackdropClick(event, () => setEditing(null))}
+        >
           <form className="modal metadata-modal" onSubmit={saveEdit} onClick={(event) => event.stopPropagation()}>
             <h2>Edit Metadata</h2>
             <div className="modal-field-grid">
@@ -663,7 +679,11 @@ export default function Admin() {
       ) : null}
 
       {confirmDialog ? (
-        <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
+        <div
+          className="modal-backdrop"
+          onPointerDown={trackBackdropPointerDown}
+          onClick={(event) => closeOnBackdropClick(event, () => setConfirmDialog(null))}
+        >
           <div
             className="modal confirm-modal"
             role="dialog"
@@ -684,7 +704,11 @@ export default function Admin() {
       ) : null}
 
       {browser ? (
-        <div className="modal-backdrop" onClick={() => setBrowser(null)}>
+        <div
+          className="modal-backdrop"
+          onPointerDown={trackBackdropPointerDown}
+          onClick={(event) => closeOnBackdropClick(event, () => setBrowser(null))}
+        >
           <div className="modal folder-modal" onClick={(event) => event.stopPropagation()}>
             <h2>Choose Folder</h2>
             <div className="current-folder">
