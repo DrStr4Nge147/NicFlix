@@ -484,6 +484,128 @@ h2 {
   gap: .75rem;
 }
 
+.episode-carousel {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: clamp(17rem, 30vw, 25rem);
+  gap: .9rem;
+  overflow-x: auto;
+  padding: .2rem clamp(1rem, 4vw, 3rem) 1rem 0;
+  scrollbar-width: thin;
+}
+
+.episode-card {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  overflow: hidden;
+  color: #fff;
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: .5rem;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease;
+}
+
+.episode-card:hover,
+.episode-card:focus-visible {
+  transform: translateY(-.18rem);
+  background: rgba(255, 255, 255, .09);
+  border-color: rgba(255, 255, 255, .18);
+  outline: 0;
+}
+
+.episode-card.disabled {
+  cursor: default;
+  opacity: .62;
+}
+
+.episode-card.disabled:hover {
+  transform: none;
+}
+
+.episode-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: linear-gradient(145deg, #242936, #11131a);
+}
+
+.episode-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform .18s ease;
+}
+
+.episode-card:hover .episode-thumb img,
+.episode-card:focus-visible .episode-thumb img {
+  transform: scale(1.035);
+}
+
+.episode-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 9, 13, .05), rgba(8, 9, 13, .72));
+}
+
+.episode-index,
+.episode-play {
+  position: absolute;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+}
+
+.episode-index {
+  left: .65rem;
+  bottom: .65rem;
+  min-width: 2.35rem;
+  height: 2rem;
+  padding: 0 .55rem;
+  color: #fff;
+  background: rgba(8, 9, 13, .78);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: .4rem;
+  font-size: .85rem;
+  font-weight: 900;
+}
+
+.episode-play {
+  right: .65rem;
+  bottom: .65rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  color: #11131a;
+  background: #fff;
+  border-radius: 999px;
+}
+
+.episode-card-meta {
+  display: grid;
+  gap: .55rem;
+  padding: .85rem;
+}
+
+.episode-card-meta h3 {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 1rem;
+}
+
+.episode-card-meta p {
+  display: -webkit-box;
+  min-height: 3.9em;
+  margin: 0;
+  overflow: hidden;
+  color: #aeb5c3;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .episode-item {
   display: grid;
   grid-template-columns: 2.5rem 1fr auto;

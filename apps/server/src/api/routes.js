@@ -225,6 +225,27 @@ function listMedia(type, limit = 60) {
   `).all(type, limit).map(mediaWithFile);
 }
 
+function getRelatedShows(show, limit = 20) {
+  const sourceGenres = new Set((show.genres || []).map((genre) => String(genre).toLowerCase()));
+  const sourceYear = Number(show.year) || null;
+  const candidates = listMedia("tv", 200).filter((item) => Number(item.id) !== Number(show.id));
+
+  return candidates
+    .map((item) => {
+      const sharedGenres = (item.genres || []).filter((genre) => sourceGenres.has(String(genre).toLowerCase()));
+      const year = Number(item.year) || null;
+      const yearScore = sourceYear && year ? Math.max(0, 6 - Math.abs(sourceYear - year)) : 0;
+      const ratingScore = Number(item.rating || 0) / 2;
+      return {
+        item,
+        score: (sharedGenres.length * 12) + yearScore + ratingScore
+      };
+    })
+    .sort((a, b) => b.score - a.score || String(a.item.title).localeCompare(String(b.item.title)))
+    .slice(0, limit)
+    .map(({ item }) => item);
+}
+
 async function refreshTvEpisodeMetadata(itemId, tmdbId, seasons = []) {
   const insertSeason = db.prepare(`
     INSERT OR IGNORE INTO seasons (media_item_id, season_number, title, overview, poster_path)
@@ -734,7 +755,8 @@ api.get("/shows/:id", (req, res) => {
     WHERE e.media_item_id = ?
     ORDER BY e.season_number, e.episode_number
   `).all(show.id);
-  res.json({ show, seasons, episodes });
+  const relatedShows = getRelatedShows(show);
+  res.json({ show, seasons, episodes, relatedShows });
 });
 
 api.get("/shows/:id/seasons", (req, res) => {
