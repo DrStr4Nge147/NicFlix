@@ -7,6 +7,7 @@ import axios from "axios";
 import { db, nowIso, rowToMedia } from "../db/database.js";
 import { scanLibrary } from "../scanner/scanner.js";
 import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManagedTmdbKey } from "../config/appConfig.js";
+import { backdropsRoot, dataRoot, postersRoot } from "../config/paths.js";
 import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
 
 export const api = express.Router();
@@ -33,6 +34,40 @@ function storedImagePath(value) {
   if (!trimmed) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return trimmed.replace(/^\/assets\//, "");
+}
+
+function toStoredAssetPath(filePath) {
+  return path.relative(dataRoot, filePath).replace(/\\/g, "/");
+}
+
+function isInsidePath(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function safeAssetName(filePath) {
+  const parsed = path.parse(filePath);
+  const base = parsed.name
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "image";
+  const ext = parsed.ext.toLowerCase() || ".jpg";
+  return `${base}${ext}`;
+}
+
+function assetTargetRoot(kind) {
+  return kind === "backdrop" ? backdropsRoot : postersRoot;
+}
+
+function imageFileEntry(currentPath, entry) {
+  const filePath = path.join(currentPath, entry.name);
+  const type = mime.lookup(filePath);
+  if (!type || !String(type).startsWith("image/")) return null;
+  return {
+    name: entry.name,
+    path: filePath,
+    type
+  };
 }
 
 function storedOptionalText(value) {
@@ -295,7 +330,12 @@ api.get("/admin/settings", (_req, res) => {
       tmdbDisconnected: config.tmdbDisconnected,
       canDisconnectTmdb: hasTmdbKey() || appManaged || Boolean(process.env.TMDB_API_KEY),
       autoSkipEnabled: config.autoSkipEnabled,
-      autoPlayNextEnabled: config.autoPlayNextEnabled
+      autoPlayNextEnabled: config.autoPlayNextEnabled,
+      assetPaths: {
+        root: dataRoot,
+        posters: postersRoot,
+        backdrops: backdropsRoot
+      }
     }
   });
 });
@@ -390,6 +430,89 @@ api.get("/fs/directories", async (req, res, next) => {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({ currentPath, parentPath, directories });
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.get("/fs/images", async (req, res, next) => {
+  try {
+    const hasPath = Object.prototype.hasOwnProperty.call(req.query, "path");
+    const requestedPath = String(req.query.path || "").trim();
+    const kind = req.query.kind === "backdrop" ? "backdrop" : "poster";
+    const targetRoot = assetTargetRoot(kind);
+
+    if (hasPath && !requestedPath && process.platform === "win32") {
+      res.json({
+        currentPath: "",
+        parentPath: null,
+        assetRoot: targetRoot,
+        directories: windowsDriveRoots(),
+        files: []
+      });
+      return;
+    }
+
+    const currentPath = path.resolve(hasPath ? requestedPath : targetRoot);
+    const parentPath = path.dirname(currentPath) === currentPath ? null : path.dirname(currentPath);
+    const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
+    const directories = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: path.join(currentPath, entry.name)
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => imageFileEntry(currentPath, entry))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ currentPath, parentPath, assetRoot: targetRoot, directories, files });
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.post("/admin/assets/local-image", async (req, res, next) => {
+  try {
+    const sourcePath = path.resolve(String(req.body.filePath || "").trim());
+    const kind = req.body.kind === "backdrop" ? "backdrop" : "poster";
+    const targetRoot = assetTargetRoot(kind);
+    const stat = await fs.promises.stat(sourcePath);
+    if (!stat.isFile()) {
+      res.status(400).json({ error: "Selected path is not a file" });
+      return;
+    }
+
+    const type = mime.lookup(sourcePath);
+    if (!type || !String(type).startsWith("image/")) {
+      res.status(400).json({ error: "Please choose a JPG, PNG, WebP, or other image file" });
+      return;
+    }
+
+    await fs.promises.mkdir(targetRoot, { recursive: true });
+
+    let storedPath;
+    if (isInsidePath(targetRoot, sourcePath)) {
+      storedPath = toStoredAssetPath(sourcePath);
+    } else {
+      const parsed = path.parse(safeAssetName(sourcePath));
+      let destination = path.join(targetRoot, `${parsed.name}${parsed.ext}`);
+      let suffix = 1;
+      while (fs.existsSync(destination)) {
+        destination = path.join(targetRoot, `${parsed.name}-${suffix}${parsed.ext}`);
+        suffix += 1;
+      }
+      await fs.promises.copyFile(sourcePath, destination);
+      storedPath = toStoredAssetPath(destination);
+    }
+
+    res.json({
+      storedPath,
+      publicUrl: publicAssetUrl(storedPath)
+    });
   } catch (error) {
     next(error);
   }

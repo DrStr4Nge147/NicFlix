@@ -6,6 +6,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileImage,
   Folder,
   FolderPlus,
   HardDrive,
@@ -39,13 +40,17 @@ export default function Admin() {
   const [mediaItems, setMediaItems] = useState([]);
   const [status, setStatus] = useState("");
   const [tmdbStatus, setTmdbStatus] = useState("");
+  const [activeTmdbItemId, setActiveTmdbItemId] = useState(null);
   const [settings, setSettings] = useState(null);
   const [tmdbApiKey, setTmdbApiKey] = useState("");
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [editing, setEditing] = useState(null);
   const [libraryForm, setLibraryForm] = useState(emptyLibraryForm);
   const [browser, setBrowser] = useState(null);
+  const [imageBrowser, setImageBrowser] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const posterInputRef = useRef(null);
+  const backdropInputRef = useRef(null);
   const mounted = useRef(false);
   const backdropPointerStartedOutside = useRef(false);
   const { task: bulkTmdb, startBulkTmdb, scanTask, startScan } = useBulkTmdb();
@@ -162,6 +167,38 @@ export default function Admin() {
     setBrowser(null);
   }
 
+  async function openImageBrowser(kind, fieldName, folderPath) {
+    try {
+      const params = new URLSearchParams({ kind });
+      if (folderPath !== undefined) params.set("path", folderPath);
+      const data = await apiFetch(`/fs/images?${params.toString()}`);
+      setImageBrowser({ ...data, kind, fieldName });
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
+  async function browseImagesTo(folderPath) {
+    if (!imageBrowser) return;
+    await openImageBrowser(imageBrowser.kind, imageBrowser.fieldName, folderPath);
+  }
+
+  async function chooseBrowsedImage(filePath) {
+    if (!imageBrowser) return;
+    try {
+      const data = await apiFetch("/admin/assets/local-image", {
+        method: "POST",
+        body: JSON.stringify({ kind: imageBrowser.kind, filePath })
+      });
+      const input = imageBrowser.fieldName === "backdrop_path" ? backdropInputRef.current : posterInputRef.current;
+      if (input) input.value = data.storedPath;
+      setStatus(`${imageBrowser.kind === "backdrop" ? "Backdrop" : "Poster"} image selected: ${data.storedPath}`);
+      setImageBrowser(null);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
   async function saveEdit(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -196,15 +233,18 @@ export default function Admin() {
 
   async function fixMatch(item) {
     try {
+      setActiveTmdbItemId(item.id);
       setStatus(`Searching TMDB for ${item.title}...`);
-      await apiFetch(`/admin/media/${item.id}/fix-match`, {
+      const data = await apiFetch(`/admin/media/${item.id}/fix-match`, {
         method: "POST",
         body: JSON.stringify({ title: item.title, year: item.year })
       });
-      setStatus("Metadata updated.");
+      setStatus(`TMDB metadata updated for "${data.media?.title || item.title}".`);
       await load();
     } catch (error) {
       setStatus(error.message);
+    } finally {
+      setActiveTmdbItemId(null);
     }
   }
 
@@ -614,8 +654,14 @@ export default function Admin() {
                   <span>{[item.type === "tv" ? "TV Show" : "Movie", item.year, item.file_name].filter(Boolean).join(" - ")}</span>
                 </div>
                 <div className="row-actions">
-                  <button className="ghost-button compact" onClick={() => fixMatch(item)} title="Force TMDB Search">
-                    <Search size={15} /> TMDB
+                  <button
+                    className="ghost-button compact"
+                    type="button"
+                    onClick={() => fixMatch(item)}
+                    disabled={activeTmdbItemId !== null}
+                    title="Force TMDB Search"
+                  >
+                    <Search size={15} /> {activeTmdbItemId === item.id ? "Searching" : "TMDB"}
                   </button>
                   <button className="ghost-button compact" onClick={() => setEditing(item)}>
                     Edit
@@ -635,6 +681,7 @@ export default function Admin() {
                 {contentSearchQuery ? "No results match your media search." : contentTab === "all" ? "Library is empty." : "All good! No items need manual review."}
               </p>
             )}
+            {status ? <p className="status" role="status" aria-live="polite">{status}</p> : null}
           </div>
         </div>
       </div>
@@ -734,8 +781,39 @@ export default function Admin() {
               <label>TMDB ID<input name="tmdb_id" type="number" min="0" defaultValue={editing.tmdb_id || ""} /></label>
               <label>IMDb ID<input name="imdb_id" defaultValue={editing.imdb_id || ""} placeholder="tt1234567" /></label>
             </div>
-            <label>Poster Image<input name="poster_path" defaultValue={editing.poster_path || ""} placeholder="https://... or posters/file.jpg" /></label>
-            <label>Backdrop Image<input name="backdrop_path" defaultValue={editing.backdrop_path || ""} placeholder="https://... or backdrops/file.jpg" /></label>
+            <div className="asset-path-note">
+              <strong>Asset folders</strong>
+              <span>Posters: {settings?.assetPaths?.posters || "data/posters"}</span>
+              <span>Backdrops: {settings?.assetPaths?.backdrops || "data/backdrops"}</span>
+            </div>
+            <label>
+              Poster Image
+              <div className="path-picker">
+                <input
+                  ref={posterInputRef}
+                  name="poster_path"
+                  defaultValue={editing.poster_path || ""}
+                  placeholder="https://... or posters/file.jpg"
+                />
+                <button className="ghost-button" type="button" onClick={() => openImageBrowser("poster", "poster_path")}>
+                  <FileImage size={17} /> Browse
+                </button>
+              </div>
+            </label>
+            <label>
+              Backdrop Image
+              <div className="path-picker">
+                <input
+                  ref={backdropInputRef}
+                  name="backdrop_path"
+                  defaultValue={editing.backdrop_path || ""}
+                  placeholder="https://... or backdrops/file.jpg"
+                />
+                <button className="ghost-button" type="button" onClick={() => openImageBrowser("backdrop", "backdrop_path")}>
+                  <FileImage size={17} /> Browse
+                </button>
+              </div>
+            </label>
             <label>Synopsis<textarea name="overview" defaultValue={editing.overview || ""} /></label>
             <div className="modal-actions">
               <button className="ghost-button" type="button" onClick={() => setEditing(null)}>Cancel</button>
@@ -807,6 +885,52 @@ export default function Admin() {
                   <Save size={17} /> Select This Folder
                 </button>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {imageBrowser ? (
+        <div
+          className="modal-backdrop"
+          onPointerDown={trackBackdropPointerDown}
+          onClick={(event) => closeOnBackdropClick(event, () => setImageBrowser(null))}
+        >
+          <div className="modal folder-modal" onClick={(event) => event.stopPropagation()}>
+            <h2>Choose {imageBrowser.kind === "backdrop" ? "Backdrop" : "Poster"} Image</h2>
+            <div className="current-folder">
+              <span>{imageBrowser.currentPath || "Computer"}</span>
+            </div>
+            <div className="folder-toolbar">
+              {imageBrowser.parentPath ? (
+                <button className="ghost-button compact" type="button" onClick={() => browseImagesTo(imageBrowser.parentPath)}>
+                  <ChevronLeft size={16} /> Back
+                </button>
+              ) : null}
+              <button className="ghost-button compact" type="button" onClick={() => browseImagesTo(undefined)}>
+                <Folder size={16} /> Asset Folder
+              </button>
+              <button className="ghost-button compact" type="button" onClick={() => browseImagesTo("")}>
+                <HardDrive size={16} /> Drives
+              </button>
+            </div>
+            <div className="folder-list">
+              {imageBrowser.directories.map((directory) => (
+                <button className="folder-row" type="button" key={directory.path} onClick={() => browseImagesTo(directory.path)}>
+                  <Folder size={17} />
+                  <span>{directory.name}</span>
+                </button>
+              ))}
+              {imageBrowser.files.map((file) => (
+                <button className="folder-row image-file-row" type="button" key={file.path} onClick={() => chooseBrowsedImage(file.path)}>
+                  <FileImage size={17} />
+                  <span>{file.name}</span>
+                </button>
+              ))}
+              {!imageBrowser.directories.length && !imageBrowser.files.length ? <p className="muted">No folders or image files inside this location.</p> : null}
+            </div>
+            <div className="modal-actions">
+              <button className="ghost-button" type="button" onClick={() => setImageBrowser(null)}>Cancel</button>
             </div>
           </div>
         </div>
