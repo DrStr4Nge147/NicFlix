@@ -152,13 +152,25 @@ export default function Admin() {
   async function saveEdit(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const numberOrNull = (name) => {
+      const value = String(form.get(name) || "").trim();
+      return value ? Number(value) : null;
+    };
     try {
       await apiFetch(`/admin/media/${editing.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           title: form.get("title"),
-          year: form.get("year") ? Number(form.get("year")) : null,
-          overview: form.get("overview")
+          original_title: form.get("original_title"),
+          year: numberOrNull("year"),
+          overview: form.get("overview"),
+          poster_path: form.get("poster_path"),
+          backdrop_path: form.get("backdrop_path"),
+          genres: form.get("genres"),
+          runtime: numberOrNull("runtime"),
+          rating: numberOrNull("rating"),
+          tmdb_id: numberOrNull("tmdb_id"),
+          imdb_id: form.get("imdb_id")
         })
       });
       setStatus("Metadata saved.");
@@ -627,11 +639,21 @@ export default function Admin() {
 
       {editing ? (
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
-          <form className="modal" onSubmit={saveEdit} onClick={(event) => event.stopPropagation()}>
+          <form className="modal metadata-modal" onSubmit={saveEdit} onClick={(event) => event.stopPropagation()}>
             <h2>Edit Metadata</h2>
-            <label>Title<input name="title" defaultValue={editing.title} /></label>
-            <label>Year<input name="year" type="number" defaultValue={editing.year || ""} /></label>
-            <label>Overview<textarea name="overview" defaultValue={editing.overview || ""} /></label>
+            <div className="modal-field-grid">
+              <label>Title<input name="title" defaultValue={editing.title} required /></label>
+              <label>Original Title<input name="original_title" defaultValue={editing.original_title || ""} /></label>
+              <label>Year<input name="year" type="number" defaultValue={editing.year || ""} /></label>
+              <label>Runtime<input name="runtime" type="number" min="0" defaultValue={editing.runtime || ""} /></label>
+              <label>Rating<input name="rating" type="number" min="0" max="10" step="0.1" defaultValue={editing.rating || ""} /></label>
+              <label>Genres<input name="genres" defaultValue={editing.genres?.join(", ") || ""} placeholder="Action, Drama, Sci-Fi" /></label>
+              <label>TMDB ID<input name="tmdb_id" type="number" min="0" defaultValue={editing.tmdb_id || ""} /></label>
+              <label>IMDb ID<input name="imdb_id" defaultValue={editing.imdb_id || ""} placeholder="tt1234567" /></label>
+            </div>
+            <label>Poster Image<input name="poster_path" defaultValue={editing.poster_path || ""} placeholder="https://... or posters/file.jpg" /></label>
+            <label>Backdrop Image<input name="backdrop_path" defaultValue={editing.backdrop_path || ""} placeholder="https://... or backdrops/file.jpg" /></label>
+            <label>Synopsis<textarea name="overview" defaultValue={editing.overview || ""} /></label>
             <div className="modal-actions">
               <button className="ghost-button" type="button" onClick={() => setEditing(null)}>Cancel</button>
               <button className="primary-button" type="submit"><Save size={17} /> Save</button>

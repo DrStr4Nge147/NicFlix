@@ -1309,6 +1309,8 @@ h2 {
 
 .modal {
   width: min(35rem, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
   display: grid;
   gap: .85rem;
   padding: 1.2rem;
@@ -1337,6 +1339,16 @@ h2 {
 .modal textarea {
   min-height: 9rem;
   resize: vertical;
+}
+
+.metadata-modal {
+  width: min(52rem, 100%);
+}
+
+.modal-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .85rem;
 }
 
 .folder-modal {
@@ -1445,6 +1457,7 @@ h2 {
 
   .library-form,
   .tmdb-settings-form,
+  .modal-field-grid,
   .library-line {
     grid-template-columns: 1fr;
   }

@@ -11,13 +11,51 @@ import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata,
 
 export const api = express.Router();
 
+function publicAssetUrl(value) {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) return trimmed;
+  return `/assets/${trimmed}`;
+}
+
 function mediaWithFile(row) {
   if (!row) return null;
   return rowToMedia({
     ...row,
-    poster_path: row.poster_path ? `/assets/${row.poster_path}` : null,
-    backdrop_path: row.backdrop_path ? `/assets/${row.backdrop_path}` : null
+    poster_path: publicAssetUrl(row.poster_path),
+    backdrop_path: publicAssetUrl(row.backdrop_path)
   });
+}
+
+function storedImagePath(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return trimmed.replace(/^\/assets\//, "");
+}
+
+function storedOptionalText(value) {
+  const trimmed = String(value || "").trim();
+  return trimmed || null;
+}
+
+function storedOptionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function storedGenres(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return JSON.stringify(parsed.map((genre) => String(genre).trim()).filter(Boolean));
+  } catch {
+    // Fall back to comma-separated manual input below.
+  }
+  return JSON.stringify(text.split(",").map((genre) => genre.trim()).filter(Boolean));
 }
 
 function parseJsonArray(value) {
@@ -886,7 +924,7 @@ api.get("/admin/unmatched", (_req, res) => {
         candidate.id
       LIMIT 1
     )
-    WHERE m.tmdb_id IS NULL OR m.overview IS NULL
+    WHERE m.tmdb_id IS NULL OR m.overview IS NULL OR m.poster_path IS NULL OR m.backdrop_path IS NULL
     GROUP BY m.id
     ORDER BY m.added_at DESC
   `).all().map(mediaWithFile);
@@ -975,10 +1013,30 @@ api.post("/admin/media/:id/fix-match", async (req, res, next) => {
 });
 
 api.patch("/admin/media/:id", (req, res) => {
-  const allowed = ["title", "year", "overview", "poster_path", "backdrop_path", "ignored"];
-  const updates = Object.entries(req.body).filter(([key]) => allowed.includes(key));
+  const fieldWriters = {
+    title: (value) => storedOptionalText(value),
+    original_title: (value) => storedOptionalText(value),
+    year: (value) => storedOptionalNumber(value),
+    overview: (value) => storedOptionalText(value),
+    poster_path: (value) => storedImagePath(value),
+    backdrop_path: (value) => storedImagePath(value),
+    genres: (value) => storedGenres(value),
+    runtime: (value) => storedOptionalNumber(value),
+    rating: (value) => storedOptionalNumber(value),
+    tmdb_id: (value) => storedOptionalNumber(value),
+    imdb_id: (value) => storedOptionalText(value),
+    ignored: (value) => value ? 1 : 0
+  };
+  const updates = Object.entries(req.body)
+    .filter(([key]) => Object.hasOwn(fieldWriters, key))
+    .map(([key, value]) => [key, fieldWriters[key](value)]);
   if (!updates.length) {
     res.status(400).json({ error: "No editable fields supplied" });
+    return;
+  }
+  const titleUpdate = updates.find(([key]) => key === "title");
+  if (titleUpdate && !titleUpdate[1]) {
+    res.status(400).json({ error: "Title is required" });
     return;
   }
   const setSql = updates.map(([key]) => `${key} = ?`).join(", ");
