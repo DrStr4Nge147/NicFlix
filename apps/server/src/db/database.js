@@ -31,6 +31,7 @@ export function migrate() {
       poster_path TEXT,
       backdrop_path TEXT,
       tmdb_id INTEGER,
+      imdb_id TEXT,
       added_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       ignored INTEGER DEFAULT 0,
@@ -107,6 +108,11 @@ export function migrate() {
   addColumn("subtitle_tracks", "TEXT");
   addColumn("external_subtitles", "TEXT");
 
+  const mediaColumns = db.prepare("PRAGMA table_info(media_items)").all().map((column) => column.name);
+  if (!mediaColumns.includes("imdb_id")) {
+    db.prepare("ALTER TABLE media_items ADD COLUMN imdb_id TEXT").run();
+  }
+
   consolidateDuplicateTvShows();
   consolidateDuplicateMovies();
   createMediaUniquenessIndexes();
@@ -121,6 +127,7 @@ function mergeMediaMetadata(canonical, duplicate) {
       poster_path = COALESCE(poster_path, ?),
       backdrop_path = COALESCE(backdrop_path, ?),
       tmdb_id = COALESCE(tmdb_id, ?),
+      imdb_id = COALESCE(imdb_id, ?),
       genres = CASE WHEN genres IS NULL OR genres = '[]' THEN ? ELSE genres END,
       runtime = COALESCE(runtime, ?),
       rating = COALESCE(rating, ?),
@@ -133,6 +140,7 @@ function mergeMediaMetadata(canonical, duplicate) {
     duplicate.poster_path,
     duplicate.backdrop_path,
     duplicate.tmdb_id,
+    duplicate.imdb_id,
     duplicate.genres,
     duplicate.runtime,
     duplicate.rating,

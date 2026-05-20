@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import mime from "mime-types";
 import ffmpeg from "fluent-ffmpeg";
+import axios from "axios";
 import { db, nowIso, rowToMedia } from "../db/database.js";
 import { scanLibrary } from "../scanner/scanner.js";
 import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManagedTmdbKey } from "../config/appConfig.js";
@@ -30,6 +31,15 @@ function parseJsonArray(value) {
 
 function getPlayableFile(fileId) {
   return db.prepare("SELECT * FROM files WHERE id = ?").get(fileId);
+}
+
+function parseTime(val) {
+  if (typeof val === "number") return val;
+  if (!val) return 0;
+  const parts = String(val).split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return Number(val) || 0;
 }
 
 function preferredEpisodeFileJoinSql() {
@@ -90,8 +100,11 @@ function getSeriesNavigation(fileId) {
 function getPlaybackContext(fileId) {
   const row = db.prepare(`
     SELECT
+      m.id AS media_item_id,
       m.title AS media_title,
       m.type,
+      m.tmdb_id,
+      m.imdb_id,
       e.title AS episode_title,
       e.season_number,
       e.episode_number,
@@ -105,11 +118,16 @@ function getPlaybackContext(fileId) {
   if (!row) return null;
 
   return {
+    mediaItemId: row.media_item_id,
     title: row.media_title || row.file_name,
     subtitle: row.episode_number
       ? `S${row.season_number}:E${row.episode_number}${row.episode_title ? ` - ${row.episode_title}` : ""}`
       : null,
-    type: row.type
+    type: row.type,
+    tmdbId: row.tmdb_id,
+    imdbId: row.imdb_id,
+    seasonNumber: row.season_number,
+    episodeNumber: row.episode_number
   };
 }
 
@@ -219,6 +237,14 @@ api.get("/health", (_req, res) => {
   res.json({ ok: true, app: "NicFlix" });
 });
 
+api.get("/settings", (_req, res) => {
+  const config = readAppConfig();
+  res.json({
+    autoSkipEnabled: config.autoSkipEnabled,
+    autoPlayNextEnabled: config.autoPlayNextEnabled
+  });
+});
+
 api.get("/admin/settings", (_req, res) => {
   const config = readAppConfig();
   const apiKey = getTmdbApiKey();
@@ -229,7 +255,23 @@ api.get("/admin/settings", (_req, res) => {
       tmdbApiKeyMasked: maskSecret(apiKey),
       tmdbApiKeySource: config.tmdbDisconnected ? "none" : (appManaged ? "app" : (process.env.TMDB_API_KEY ? "env" : "none")),
       tmdbDisconnected: config.tmdbDisconnected,
-      canDisconnectTmdb: hasTmdbKey() || appManaged || Boolean(process.env.TMDB_API_KEY)
+      canDisconnectTmdb: hasTmdbKey() || appManaged || Boolean(process.env.TMDB_API_KEY),
+      autoSkipEnabled: config.autoSkipEnabled,
+      autoPlayNextEnabled: config.autoPlayNextEnabled
+    }
+  });
+});
+
+api.patch("/admin/settings/player", (req, res) => {
+  const updates = {};
+  if (typeof req.body.autoSkipEnabled === "boolean") updates.autoSkipEnabled = req.body.autoSkipEnabled;
+  if (typeof req.body.autoPlayNextEnabled === "boolean") updates.autoPlayNextEnabled = req.body.autoPlayNextEnabled;
+
+  const nextConfig = writeAppConfig(updates);
+  res.json({
+    settings: {
+      autoSkipEnabled: nextConfig.autoSkipEnabled,
+      autoPlayNextEnabled: nextConfig.autoPlayNextEnabled
     }
   });
 });
@@ -420,13 +462,15 @@ api.get("/home", (_req, res) => {
       1 AS resume,
       e.title AS episode_title,
       e.season_number,
-      e.episode_number
+      e.episode_number,
+      MAX(wp.updated_at) AS latest_progress
     FROM watch_progress wp
     JOIN files f ON f.id = wp.file_id
     JOIN media_items m ON m.id = f.media_item_id
     LEFT JOIN episodes e ON e.id = f.episode_id
     WHERE wp.watched = 0 AND wp.position > 30 AND m.ignored = 0
-    ORDER BY wp.updated_at DESC
+    GROUP BY m.id
+    ORDER BY latest_progress DESC
     LIMIT 20
   `).all().map(mediaWithFile);
 
@@ -657,6 +701,90 @@ api.get("/files/:fileId/context", (req, res) => {
   res.json({ context });
 });
 
+api.get("/files/:fileId/segments", async (req, res) => {
+  const config = readAppConfig();
+  if (!config.autoSkipEnabled) return res.json({ segments: [] });
+
+  const context = getPlaybackContext(req.params.fileId);
+  if (!context || !context.tmdbId) return res.json({ segments: [] });
+
+  let { imdbId, tmdbId, seasonNumber, episodeNumber, type } = context;
+  const isTv = type === "tv" && seasonNumber !== null && episodeNumber !== null;
+
+  try {
+    if (!imdbId) {
+      console.log(`Missing IMDb ID for TMDB ${tmdbId}, fetching...`);
+      const details = await (type === "tv" ? fetchTvMetadata(context.title) : fetchMovieMetadata(context.title));
+      if (details?.imdbId) {
+        imdbId = details.imdbId;
+        db.prepare("UPDATE media_items SET imdb_id = ? WHERE id = ?").run(imdbId, context.mediaItemId);
+      }
+    }
+
+    if (!imdbId) {
+      console.warn(`Could not resolve IMDb ID for TMDB ${tmdbId}`);
+      return res.json({ segments: [] });
+    }
+
+    const url = isTv
+      ? `https://api.introdb.app/segments?imdb_id=${imdbId}&season=${seasonNumber}&episode=${episodeNumber}`
+      : `https://api.introdb.app/segments?imdb_id=${imdbId}`;
+
+    console.log(`Fetching segments for IMDb: ${imdbId} (TMDB: ${tmdbId}), URL: ${url}`);
+    const response = await axios.get(url, {
+      timeout: 5000,
+      headers: { "User-Agent": "NicFlix/1.0" }
+    });
+    const rawData = response.data;
+    console.log("Raw IntroDB data:", JSON.stringify(rawData));
+
+    const segments = [];
+    if (rawData) {
+      if (Array.isArray(rawData)) {
+        rawData.forEach((s) => {
+          const start = s.startTime ?? s.start_sec ?? s.startAt ?? s.start ?? null;
+          const end = s.endTime ?? s.end_sec ?? s.endAt ?? s.end ?? null;
+          if (start !== null && end !== null) {
+            segments.push({ start: parseTime(start), end: parseTime(end), type: s.segment_type || s.type || "intro" });
+          }
+        });
+      } else {
+        // Handle nested structure: { intro: { start_sec, ... }, recap: ... }
+        ["intro", "recap", "outro", "credits"].forEach((key) => {
+          const s = rawData[key];
+          if (s && (s.start_sec !== undefined || s.startTime !== undefined)) {
+            segments.push({
+              start: parseTime(s.start_sec ?? s.startTime),
+              end: parseTime(s.end_sec ?? s.endTime),
+              type: key
+            });
+          }
+        });
+        // Handle { segments: [...] }
+        if (segments.length === 0 && Array.isArray(rawData.segments)) {
+          rawData.segments.forEach((s) => {
+            const start = s.startTime ?? s.start_sec ?? s.startAt ?? s.start ?? null;
+            const end = s.endTime ?? s.end_sec ?? s.endAt ?? s.end ?? null;
+            if (start !== null && end !== null) {
+              segments.push({ start: parseTime(start), end: parseTime(end), type: s.segment_type || s.type || "intro" });
+            }
+          });
+        }
+      }
+    }
+
+    console.log("Normalized segments:", segments);
+    res.json({ segments });
+  } catch (error) {
+    if (error.response?.status === 404) {
+      console.log(`No segments found in IntroDB for ${imdbId || tmdbId}`);
+    } else {
+      console.error("IntroDB lookup failed:", error.message);
+    }
+    res.json({ segments: [] });
+  }
+});
+
 api.get("/files/:fileId/next", (req, res) => {
   res.json({ next: getSeriesNavigation(req.params.fileId).next });
 });
@@ -706,6 +834,16 @@ api.post("/progress/:fileId", (req, res) => {
   const position = Number(req.body.position || 0);
   const duration = Number(req.body.duration || 0) || null;
   const watched = req.body.watched === true || (duration && position / duration >= 0.9) ? 1 : 0;
+  const file = db.prepare("SELECT media_item_id FROM files WHERE id = ?").get(req.params.fileId);
+  if (file) {
+    db.prepare(`
+      DELETE FROM watch_progress 
+      WHERE watched = 0 
+        AND file_id != ? 
+        AND file_id IN (SELECT id FROM files WHERE media_item_id = ?)
+    `).run(req.params.fileId, file.media_item_id);
+  }
+
   db.prepare(`
     INSERT INTO watch_progress (file_id, position, duration, watched, updated_at)
     VALUES (?, ?, ?, ?, ?)
@@ -798,7 +936,7 @@ api.post("/admin/media/:id/fix-match", async (req, res, next) => {
     }
     db.prepare(`
       UPDATE media_items SET title = ?, original_title = ?, year = ?, overview = ?, poster_path = ?,
-        backdrop_path = ?, tmdb_id = ?, genres = ?, runtime = ?, rating = ?, updated_at = ?
+        backdrop_path = ?, tmdb_id = ?, imdb_id = ?, genres = ?, runtime = ?, rating = ?, updated_at = ?
       WHERE id = ?
     `).run(
       metadata.title,
@@ -808,6 +946,7 @@ api.post("/admin/media/:id/fix-match", async (req, res, next) => {
       metadata.posterPath,
       metadata.backdropPath,
       metadata.tmdbId,
+      metadata.imdbId,
       JSON.stringify(metadata.genres || []),
       metadata.runtime,
       metadata.rating,

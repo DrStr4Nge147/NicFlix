@@ -163,9 +163,10 @@ export async function fetchMovieMetadata(title, year) {
   ));
   const result = await bestSearchResult("/search/movie", attempts, "movie", year);
   if (!result) return null;
-  const details = await tmdbGet(`/movie/${result.id}`, {}, { allowNotFound: true });
+  const details = await tmdbGet(`/movie/${result.id}`, { append_to_response: "external_ids" }, { allowNotFound: true });
   return {
     tmdbId: result.id,
+    imdbId: details?.external_ids?.imdb_id || null,
     title: details?.title || result.title || title,
     originalTitle: details?.original_title || result.original_title || null,
     year: (details?.release_date || result.release_date || "").slice(0, 4) || year || null,
@@ -197,9 +198,10 @@ export async function fetchTvMetadata(title, year = null) {
   ));
   const result = await bestSearchResult("/search/tv", attempts, "tv", year);
   if (!result) return movieMetadataAsTvMetadata(await fetchMovieMetadata(title, year));
-  const details = await tmdbGet(`/tv/${result.id}`, {}, { allowNotFound: true });
+  const details = await tmdbGet(`/tv/${result.id}`, { append_to_response: "external_ids" }, { allowNotFound: true });
   return {
     tmdbId: result.id,
+    imdbId: details?.external_ids?.imdb_id || null,
     title: details?.name || result.name || title,
     originalTitle: details?.original_name || result.original_name || null,
     year: (details?.first_air_date || result.first_air_date || "").slice(0, 4) || null,

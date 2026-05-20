@@ -9,7 +9,9 @@ const secretPath = path.join(dataRoot, "app.secret");
 const defaultConfig = {
   libraries: [],
   tmdbApiKeyEncrypted: "",
-  tmdbDisconnected: false
+  tmdbDisconnected: false,
+  autoSkipEnabled: true,
+  autoPlayNextEnabled: true
 };
 
 function readRawConfig() {
@@ -23,7 +25,9 @@ function readRawConfig() {
     libraries: Array.isArray(parsed.libraries) ? parsed.libraries : [],
     tmdbApiKeyEncrypted: typeof parsed.tmdbApiKeyEncrypted === "string" ? parsed.tmdbApiKeyEncrypted : "",
     tmdbApiKey: typeof parsed.tmdbApiKey === "string" ? parsed.tmdbApiKey : "",
-    tmdbDisconnected: parsed.tmdbDisconnected === true
+    tmdbDisconnected: parsed.tmdbDisconnected === true,
+    autoSkipEnabled: parsed.autoSkipEnabled !== false,
+    autoPlayNextEnabled: parsed.autoPlayNextEnabled !== false
   };
 }
 
@@ -66,7 +70,9 @@ export function readAppConfig() {
   return {
     libraries: config.libraries,
     tmdbApiKeyEncrypted: config.tmdbApiKeyEncrypted,
-    tmdbDisconnected: config.tmdbDisconnected
+    tmdbDisconnected: config.tmdbDisconnected,
+    autoSkipEnabled: config.autoSkipEnabled,
+    autoPlayNextEnabled: config.autoPlayNextEnabled
   };
 }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, AudioLines, Captions, Maximize, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, List, Maximize, Pause, PictureInPicture2, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
 
 function formatTime(seconds = 0) {
@@ -21,6 +21,8 @@ export default function Watch() {
   const [selectedSubtitle, setSelectedSubtitle] = useState("off");
   const [openTrackMenu, setOpenTrackMenu] = useState(null);
   const [playbackContext, setPlaybackContext] = useState(null);
+  const [openSeasons, setOpenSeasons] = useState({});
+  const [showData, setShowData] = useState({ seasons: [], episodes: [] });
   const [episodeNav, setEpisodeNav] = useState({ previous: null, next: null });
   const [nextUp, setNextUp] = useState(null);
   const [countdown, setCountdown] = useState(null);
@@ -31,6 +33,9 @@ export default function Watch() {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [segments, setSegments] = useState([]);
+  const [activeSegment, setActiveSegment] = useState(null);
+  const [globalSettings, setGlobalSettings] = useState(null);
 
   const saveProgress = useCallback((watched = false) => {
     const video = videoRef.current;
@@ -67,7 +72,16 @@ export default function Watch() {
     let cancelled = false;
     apiFetch(`/files/${fileId}/tracks`)
       .then((data) => {
-        if (!cancelled) setTracks(data);
+        if (!cancelled) {
+          setTracks(data);
+          if (data.subtitleTracks?.length > 0) {
+            const englishIndex = data.subtitleTracks.findIndex((t) =>
+              (t.language || "").toLowerCase().includes("en")
+              || (t.label || "").toLowerCase().includes("eng")
+            );
+            setSelectedSubtitle(englishIndex !== -1 ? String(englishIndex) : "0");
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setTracks({ audioTracks: [], subtitleTracks: [] });
@@ -87,10 +101,54 @@ export default function Watch() {
         if (!cancelled) setEpisodeNav({ previous: null, next: null });
       });
 
+    setSegments([]);
+    setActiveSegment(null);
+    apiFetch(`/files/${fileId}/segments`)
+      .then((data) => {
+        if (!cancelled && data.segments) setSegments(data.segments);
+      })
+      .catch(() => {
+        if (!cancelled) setSegments([]);
+      });
+
+    apiFetch("/settings")
+      .then((data) => {
+        if (!cancelled) {
+          setGlobalSettings(data);
+          if (data.autoPlayNextEnabled === false) {
+            setAutoPlayNext(false);
+          }
+        }
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
   }, [fileId]);
+
+  useEffect(() => {
+    if (!playbackContext || playbackContext.type !== "tv" || !playbackContext.mediaItemId) {
+      setShowData({ seasons: [], episodes: [] });
+      return undefined;
+    }
+
+    let cancelled = false;
+    apiFetch(`/shows/${playbackContext.mediaItemId}`).then((data) => {
+      if (!cancelled) {
+        setShowData(data);
+        if (playbackContext.seasonNumber !== undefined) {
+          setOpenSeasons((prev) => ({ ...prev, [playbackContext.seasonNumber]: true }));
+        }
+      }
+    }).catch(() => {
+      if (!cancelled) setShowData({ seasons: [], episodes: [] });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playbackContext]);
 
   useEffect(() => {
     let timer;
@@ -153,6 +211,43 @@ export default function Watch() {
   }, [autoPlayNext, episodeNav.next, fileId, saveProgress]);
 
   useEffect(() => {
+    if (!segments.length) {
+      setActiveSegment(null);
+      return;
+    }
+    // Find the currently active segment with a small buffer for precision
+    const segment = segments.find((s) => {
+      const isOutro = ["outro", "credits"].includes(s.type);
+      if (isOutro) {
+        // Outros should appear as soon as the segment starts and stay until the end of the file
+        return currentTime >= s.start - 1;
+      }
+      return currentTime >= s.start - 0.5 && currentTime < s.end - 0.2;
+    });
+    setActiveSegment(segment || null);
+  }, [currentTime, segments]);
+
+  function skipSegment() {
+    if (activeSegment && videoRef.current) {
+      if (["outro", "credits"].includes(activeSegment.type) && episodeNav.next) {
+        playNext();
+      } else {
+        // Seek to the end of segment, or end of video if it's an outro
+        const isOutro = ["outro", "credits"].includes(activeSegment.type);
+        videoRef.current.currentTime = isOutro ? videoRef.current.duration : activeSegment.end;
+        setActiveSegment(null);
+      }
+    }
+  }
+
+  function toggleSeason(seasonNumber) {
+    setOpenSeasons((prev) => ({
+      ...prev,
+      [seasonNumber]: !prev[seasonNumber]
+    }));
+  }
+
+  useEffect(() => {
     if (!nextUp || countdown === null) return undefined;
     if (countdown <= 0) {
       navigate(`/watch/${nextUp.file_id}`, { replace: true });
@@ -186,6 +281,42 @@ export default function Watch() {
     document.addEventListener("pointerdown", closeMenus);
     return () => document.removeEventListener("pointerdown", closeMenus);
   }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (["input", "textarea"].includes(event.target.tagName.toLowerCase())) return;
+
+      const video = videoRef.current;
+      if (!video) return;
+
+      switch (event.code) {
+        case "Space":
+        case "KeyK":
+          event.preventDefault();
+          togglePlayback();
+          break;
+        case "ArrowLeft":
+          video.currentTime = Math.max(0, video.currentTime - 10);
+          showControls();
+          break;
+        case "ArrowRight":
+          video.currentTime = Math.min(video.duration, video.currentTime + 10);
+          showControls();
+          break;
+        case "KeyF":
+          toggleFullscreen();
+          break;
+        case "KeyM":
+          toggleMute();
+          break;
+        default:
+          break;
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [playbackContext]);
 
   function changeAudioTrack(value) {
     setSelectedAudio(value);
@@ -260,6 +391,20 @@ export default function Watch() {
     video.muted = nextVolume === 0;
   }
 
+  async function togglePip() {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (video !== document.pictureInPictureElement) {
+        await video.requestPictureInPicture();
+      } else {
+        await document.exitPictureInPicture();
+      }
+    } catch (error) {
+      console.warn("PiP failed:", error);
+    }
+  }
+
   function toggleFullscreen() {
     const container = videoRef.current?.closest(".watch-page");
     if (!container) return;
@@ -285,11 +430,15 @@ export default function Watch() {
         <ArrowLeft size={19} /> Back
       </button>
       {playbackContext ? (
-        <div className="watch-title-chip" aria-live="polite">
-          <strong>{playbackContext.title}</strong>
-          {playbackContext.subtitle ? <span>{playbackContext.subtitle}</span> : null}
+        <div className={`watch-pause-overlay ${!isPlaying ? "visible" : ""}`}>
+          <div className="watch-pause-content">
+            <span className="eyebrow">{playbackContext.type === "tv" ? "TV Show" : "Movie"}</span>
+            <h1>{playbackContext.title}</h1>
+            {playbackContext.subtitle ? <h2>{playbackContext.subtitle}</h2> : null}
+          </div>
         </div>
       ) : null}
+
       <video ref={videoRef} src={`/api/stream/${fileId}`} autoPlay playsInline onClick={togglePlayback}>
         {tracks.subtitleTracks.map((track, index) => (
           <track
@@ -301,6 +450,24 @@ export default function Watch() {
           />
         ))}
       </video>
+
+      {activeSegment ? (
+        <button
+          className={`watch-skip-button ${!controlsVisible && isPlaying ? "controls-hidden" : ""}`}
+          type="button"
+          onClick={skipSegment}
+        >
+          {activeSegment.type === "intro"
+            ? "Skip Intro"
+            : activeSegment.type === "recap"
+              ? "Skip Recap"
+              : (activeSegment.type === "outro" || activeSegment.type === "credits") && episodeNav.next
+                ? "Next Episode"
+                : "Skip Outro"}
+          <SkipForward size={20} fill="currentColor" />
+        </button>
+      ) : null}
+
       <div className="watch-controls">
         <input
           className="watch-seek"
@@ -430,6 +597,61 @@ export default function Watch() {
               </div>
             ) : null}
           </div>
+          <div className="watch-track-menu">
+            <button
+              className="watch-control-button"
+              type="button"
+              onClick={() => toggleTrackMenu("playlist")}
+              aria-label="Playlist"
+              aria-haspopup="menu"
+              aria-expanded={openTrackMenu === "playlist"}
+              disabled={playbackContext?.type !== "tv" || !showData.episodes.length}
+              title="Episodes"
+            >
+              <List size={23} />
+            </button>
+            {openTrackMenu === "playlist" ? (
+              <div className="watch-track-popover watch-playlist-popover" role="menu" aria-label="Episodes">
+                {showData.seasons.map((season) => (
+                  <div key={season.season_number} className="watch-playlist-season">
+                    <button
+                      className={`watch-playlist-season-header ${playbackContext?.seasonNumber === season.season_number ? "watching" : ""}`}
+                      type="button"
+                      onClick={() => toggleSeason(season.season_number)}
+                      aria-expanded={openSeasons[season.season_number]}
+                    >
+                      {season.title || `Season ${season.season_number}`}
+                    </button>
+                    {openSeasons[season.season_number] ? (
+                      <div className="watch-playlist-episodes">
+                        {showData.episodes
+                          .filter((ep) => ep.season_number === season.season_number)
+                          .map((ep) => (
+                            <button
+                              key={ep.id}
+                              className={`watch-playlist-episode ${Number(ep.file_id) === Number(fileId) ? "active" : ""}`}
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                playEpisode(ep);
+                                setOpenTrackMenu(null);
+                              }}
+                            >
+                              <span className="ep-num">E{ep.episode_number}</span>
+                              <span className="ep-title">{ep.title || `Episode ${ep.episode_number}`}</span>
+                              {ep.watched ? <div className="ep-watched-dot" title="Watched" /> : null}
+                            </button>
+                          ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <button className="watch-control-button" type="button" onClick={togglePip} aria-label="Picture in Picture" title="Mini player">
+            <PictureInPicture2 size={23} />
+          </button>
           <button className="watch-control-button" type="button" onClick={toggleFullscreen} aria-label="Fullscreen">
             <Maximize size={23} />
           </button>

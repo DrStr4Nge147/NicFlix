@@ -225,6 +225,18 @@ export default function Admin() {
     }
   }
 
+  async function togglePlayerSetting(key, value) {
+    try {
+      const data = await apiFetch("/admin/settings/player", {
+        method: "PATCH",
+        body: JSON.stringify({ [key]: value })
+      });
+      setSettings((current) => ({ ...current, ...data.settings }));
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
   const visibleMediaItems = mediaItems.filter((item) => {
     const query = mediaQuery.trim().toLowerCase();
     if (!query) return true;
@@ -348,6 +360,34 @@ export default function Admin() {
           </a>
         </details>
         {tmdbStatus ? <p className={tmdbStatus.toLowerCase().includes("success") || tmdbStatus.toLowerCase().includes("connected") ? "status" : "settings-error"}>{tmdbStatus}</p> : null}
+      </div>
+      <div className="panel player-settings-panel">
+        <h2>Player Features</h2>
+        <p className="muted">Global defaults for the video player. Users can still adjust these during playback.</p>
+        <div className="settings-toggles">
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={settings?.autoSkipEnabled ?? true}
+              onChange={(e) => togglePlayerSetting("autoSkipEnabled", e.target.checked)}
+            />
+            <div>
+              <strong>Enable "Skip Intro / Outro"</strong>
+              <p className="muted">Fetches segment timing from IntroDB and shows a skip button during playback.</p>
+            </div>
+          </label>
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={settings?.autoPlayNextEnabled ?? true}
+              onChange={(e) => togglePlayerSetting("autoPlayNextEnabled", e.target.checked)}
+            />
+            <div>
+              <strong>Default Auto-play Next Episode</strong>
+              <p className="muted">Automatically counts down to the next episode when the current one ends.</p>
+            </div>
+          </label>
+        </div>
       </div>
       <div className="admin-grid">
         <div className="panel">
