@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 import { Play, RefreshCw } from "lucide-react";
 import { apiFetch, backdropUrl } from "../lib/api.js";
 import MediaRow from "../components/MediaRow.jsx";
+import ConfirmationModal from "../components/ConfirmationModal.jsx";
 
 export default function Home() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [itemToReset, setItemToReset] = useState(null);
+
   const hero = rows.flatMap((row) => row.items)[0];
   const heroDetailsTo = hero?.type === "tv" ? `/shows/${hero.id}` : `/movies/${hero?.id}`;
   const heroPlayLabel = hero?.resume ? "Resume" : "Play";
@@ -18,17 +21,21 @@ export default function Home() {
     apiFetch("/home").then((data) => setRows(data.rows)).finally(() => setLoading(false));
   }, []);
 
-  const removeContinueItem = async (item) => {
-    if (!item.file_id) return;
-    await apiFetch(`/progress/${item.file_id}`, {
-      method: "POST",
-      body: JSON.stringify({ position: 0, duration: item.file_duration || item.duration || 0, watched: false })
+  const handleConfirmReset = async () => {
+    if (!itemToReset) return;
+    
+    // Reset all progress for this media item (movie or TV show)
+    await apiFetch(`/progress/media/${itemToReset.id}`, {
+      method: "DELETE"
     });
+
     setRows((currentRows) => currentRows
       .map((row) => row.title === "Continue Watching"
-        ? { ...row, items: row.items.filter((rowItem) => rowItem.file_id !== item.file_id) }
+        ? { ...row, items: row.items.filter((rowItem) => rowItem.id !== itemToReset.id) }
         : row)
       .filter((row) => row.items.length));
+    
+    setItemToReset(null);
   };
 
   if (loading) return <div className="empty-state">Loading your library...</div>;
@@ -62,10 +69,20 @@ export default function Home() {
             key={row.title}
             title={row.title}
             items={row.items}
-            onRemoveItem={row.title === "Continue Watching" ? removeContinueItem : undefined}
+            onRemoveItem={row.title === "Continue Watching" ? (item) => setItemToReset(item) : undefined}
           />
         ))}
       </div>
+
+      {itemToReset && (
+        <ConfirmationModal
+          title="Reset Progress?"
+          message={`This will permanently clear your watch progress for "${itemToReset.title}". ${itemToReset.type === 'tv' ? 'All seasons and episodes will be reset.' : ''}`}
+          confirmLabel="Reset Everything"
+          onConfirm={handleConfirmReset}
+          onCancel={() => setItemToReset(null)}
+        />
+      )}
     </>
   );
 }

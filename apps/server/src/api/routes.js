@@ -861,6 +861,18 @@ api.delete("/progress/:fileId", (req, res) => {
   res.json({ ok: true });
 });
 
+api.delete("/progress/media/:mediaId", (req, res) => {
+  const mediaId = req.params.mediaId;
+  const fileIds = db.prepare("SELECT id FROM files WHERE media_item_id = ?").all(mediaId).map((row) => row.id);
+  
+  if (fileIds.length) {
+    const placeholders = fileIds.map(() => "?").join(",");
+    db.prepare(`DELETE FROM watch_progress WHERE file_id IN (${placeholders})`).run(...fileIds);
+  }
+  
+  res.json({ ok: true });
+});
+
 api.get("/admin/unmatched", (_req, res) => {
   const items = db.prepare(`
     SELECT m.*, f.id AS file_id, f.file_name
