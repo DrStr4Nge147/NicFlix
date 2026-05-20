@@ -35,12 +35,16 @@ export default function AppLayout() {
         <nav className="navlinks">
           <NavLink to="/movies">Movies</NavLink>
           <NavLink to="/shows">TV Shows</NavLink>
-          <NavLink to="/admin"><Settings size={17} /> Admin</NavLink>
         </nav>
-        <form className="search-form" onSubmit={submit}>
-          <Search size={17} />
-          <input value={query} onChange={updateQuery} placeholder="Search library" />
-        </form>
+        <div className="topbar-actions">
+          <form className="search-form" onSubmit={submit}>
+            <Search size={17} />
+            <input value={query} onChange={updateQuery} placeholder="Search library" />
+          </form>
+          <NavLink className="icon-button admin-button" to="/admin" title="Admin">
+            <Settings size={20} />
+          </NavLink>
+        </div>
       </header>
       <main>
         <Outlet />

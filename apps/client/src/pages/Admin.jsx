@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Activity,
   CheckCircle2,
   ChevronLeft,
   ExternalLink,
@@ -9,10 +10,13 @@ import {
   FolderPlus,
   HardDrive,
   KeyRound,
+  LayoutGrid,
+  Library,
   Pencil,
   RefreshCw,
   Save,
   Search,
+  Settings,
   Trash2
 } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
@@ -26,10 +30,12 @@ const emptyLibraryForm = {
 };
 
 export default function Admin() {
+  const [activeTab, setActiveTab] = useState("general");
+  const [contentTab, setContentTab] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [libraries, setLibraries] = useState([]);
   const [unmatched, setUnmatched] = useState([]);
   const [mediaItems, setMediaItems] = useState([]);
-  const [mediaQuery, setMediaQuery] = useState("");
   const [status, setStatus] = useState("");
   const [tmdbStatus, setTmdbStatus] = useState("");
   const [settings, setSettings] = useState(null);
@@ -237,17 +243,22 @@ export default function Admin() {
     }
   }
 
-  const visibleMediaItems = mediaItems.filter((item) => {
-    const query = mediaQuery.trim().toLowerCase();
-    if (!query) return true;
-    return [
-      item.title,
-      item.original_title,
-      item.type === "tv" ? "tv show" : "movie",
-      item.year ? String(item.year) : "",
-      item.file_name
-    ].some((value) => value?.toLowerCase().includes(query));
-  });
+  const matchesSearch = (text) => {
+    if (!searchQuery) return true;
+    return text?.toLowerCase().includes(searchQuery.toLowerCase());
+  };
+
+  const filteredMedia = mediaItems.filter(item => 
+    matchesSearch(item.title) || 
+    matchesSearch(item.file_name) || 
+    matchesSearch(item.year?.toString())
+  );
+
+  const filteredUnmatched = unmatched.filter(item => 
+    matchesSearch(item.title) || 
+    matchesSearch(item.file_name)
+  );
+
   const canDisconnectTmdb = Boolean(
     settings?.canDisconnectTmdb
     || settings?.tmdbConfigured
@@ -288,110 +299,125 @@ export default function Admin() {
     await action?.();
   }
 
-  return (
-    <section className="page-pad admin-page">
-      <h1>Admin</h1>
-      <p className="muted">Add local folder paths, scan them, and connect TMDB for posters, plots, ratings, and episode metadata.</p>
-      <div className="panel tmdb-panel">
-        <div className="panel-header">
-          <div>
-            <h2>TMDB Metadata API</h2>
-            <p className="muted">
-              {settings?.tmdbDisconnected
-                ? "Disconnected. NicFlix will not use TMDB until you connect a key again."
-                : settings?.tmdbConfigured
-                ? `Connected from ${settings.tmdbApiKeySource === "env" ? "server environment" : "app settings"} (${settings.tmdbApiKeyMasked}).`
-                : "Not connected yet. Matching still works best after adding your free TMDB developer API key."}
-            </p>
-            <p className="muted">Saved app keys are encrypted at rest and are never sent back to the browser.</p>
-          </div>
-          <div className="tmdb-header-actions">
-            <span className={settings?.tmdbConfigured ? "settings-pill connected" : "settings-pill"}>
-              {settings?.tmdbConfigured ? <CheckCircle2 size={16} /> : <KeyRound size={16} />}
-              {settings?.tmdbConfigured ? "Connected" : "Setup Needed"}
-            </span>
-            {canDisconnectTmdb ? (
-              <button className="ghost-button compact danger-button" type="button" onClick={confirmDisconnectTmdbSettings}>
-                <Trash2 size={15} /> Disconnect
-              </button>
-            ) : null}
-          </div>
+  function renderGeneralSettings() {
+    return (
+      <div className="admin-content">
+        <div className="admin-section-title">
+          <Settings size={28} />
+          <h2>General Settings</h2>
         </div>
-        <form className="tmdb-settings-form" onSubmit={saveTmdbSettings}>
-          <label>
-            TMDB API Key
-            <div className="secret-input">
+
+        <div className="panel tmdb-panel">
+          <div className="panel-header">
+            <div>
+              <h3>TMDB Metadata API</h3>
+              <p className="muted">
+                {settings?.tmdbDisconnected
+                  ? "Disconnected. NicFlix will not use TMDB until you connect a key again."
+                  : settings?.tmdbConfigured
+                  ? `Connected from ${settings.tmdbApiKeySource === "env" ? "server environment" : "app settings"} (${settings.tmdbApiKeyMasked}).`
+                  : "Not connected yet. Matching still works best after adding your free TMDB developer API key."}
+              </p>
+            </div>
+            <div className="tmdb-header-actions">
+              <span className={settings?.tmdbConfigured ? "settings-pill connected" : "settings-pill"}>
+                {settings?.tmdbConfigured ? <CheckCircle2 size={16} /> : <KeyRound size={16} />}
+                {settings?.tmdbConfigured ? "Connected" : "Setup Needed"}
+              </span>
+              {canDisconnectTmdb ? (
+                <button className="ghost-button compact danger-button" type="button" onClick={confirmDisconnectTmdbSettings}>
+                  <Trash2 size={15} /> Disconnect
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <form className="tmdb-settings-form" onSubmit={saveTmdbSettings}>
+            <label>
+              TMDB API Key
+              <div className="secret-input">
+                <input
+                  type={showTmdbKey ? "text" : "password"}
+                  value={tmdbApiKey}
+                  onChange={(event) => setTmdbApiKey(event.target.value)}
+                  placeholder={settings?.tmdbConfigured ? "Paste a new key to replace the saved one" : "Paste your v3 API Key here"}
+                  autoComplete="off"
+                />
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => setShowTmdbKey((current) => !current)}
+                  aria-label={showTmdbKey ? "Hide API key" : "Show API key"}
+                >
+                  {showTmdbKey ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
+            </label>
+            <div className="tmdb-button-row">
+              <button className="ghost-button" type="button" onClick={testTmdbSettings} disabled={!tmdbApiKey.trim()}>
+                <RefreshCw size={17} /> Test
+              </button>
+              <button className="primary-button" type="submit" disabled={!tmdbApiKey.trim()}>
+                <Save size={17} /> Save API Key
+              </button>
+            </div>
+          </form>
+          <details className="setup-guide" open={!settings?.tmdbConfigured}>
+            <summary>First time? Get a free TMDB key without being a developer</summary>
+            <ol>
+              <li>Create or sign in to a free TMDB account, then use a desktop browser for the API page.</li>
+              <li>Open your account settings and choose API. Accept the terms when asked.</li>
+              <li>When it asks about your use, choose Developer. For app details, use NicFlix as the app name and personal home media metadata as the purpose.</li>
+              <li>Copy the v3 API Key, not the long API Read Access Token, then paste it above and press Test.</li>
+            </ol>
+            <a className="guide-link" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">
+              Open TMDB API settings <ExternalLink size={15} />
+            </a>
+          </details>
+          {tmdbStatus ? <p className={tmdbStatus.toLowerCase().includes("success") || tmdbStatus.toLowerCase().includes("connected") ? "status" : "settings-error"}>{tmdbStatus}</p> : null}
+        </div>
+
+        <div className="panel player-settings-panel">
+          <h3>Player Features</h3>
+          <p className="muted">Global defaults for the video player. Users can still adjust these during playback.</p>
+          <div className="settings-toggles">
+            <label className="toggle-label">
               <input
-                type={showTmdbKey ? "text" : "password"}
-                value={tmdbApiKey}
-                onChange={(event) => setTmdbApiKey(event.target.value)}
-                placeholder={settings?.tmdbConfigured ? "Paste a new key to replace the saved one" : "Paste your v3 API Key here"}
-                autoComplete="off"
+                type="checkbox"
+                checked={settings?.autoSkipEnabled ?? true}
+                onChange={(e) => togglePlayerSetting("autoSkipEnabled", e.target.checked)}
               />
-              <button
-                className="icon-button"
-                type="button"
-                onClick={() => setShowTmdbKey((current) => !current)}
-                aria-label={showTmdbKey ? "Hide API key" : "Show API key"}
-              >
-                {showTmdbKey ? <EyeOff size={17} /> : <Eye size={17} />}
-              </button>
-            </div>
-          </label>
-          <div className="tmdb-button-row">
-            <button className="ghost-button" type="button" onClick={testTmdbSettings} disabled={!tmdbApiKey.trim()}>
-              <RefreshCw size={17} /> Test
-            </button>
-            <button className="primary-button" type="submit" disabled={!tmdbApiKey.trim()}>
-              <Save size={17} /> Save API Key
-            </button>
+              <div>
+                <strong>Enable "Skip Intro / Outro" (Experimental)</strong>
+                <p className="muted">Fetches segment timing from IntroDB and shows a skip button during playback.</p>
+              </div>
+            </label>
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={settings?.autoPlayNextEnabled ?? true}
+                onChange={(e) => togglePlayerSetting("autoPlayNextEnabled", e.target.checked)}
+              />
+              <div>
+                <strong>Default Auto-play Next Episode</strong>
+                <p className="muted">Automatically counts down to the next episode when the current one ends.</p>
+              </div>
+            </label>
           </div>
-        </form>
-        <details className="setup-guide" open={!settings?.tmdbConfigured}>
-          <summary>First time? Get a free TMDB key without being a developer</summary>
-          <ol>
-            <li>Create or sign in to a free TMDB account, then use a desktop browser for the API page.</li>
-            <li>Open your account settings and choose API. Accept the terms when asked.</li>
-            <li>When it asks about your use, choose Developer. For app details, use NicFlix as the app name and personal home media metadata as the purpose.</li>
-            <li>Copy the v3 API Key, not the long API Read Access Token, then paste it above and press Test.</li>
-          </ol>
-          <a className="guide-link" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">
-            Open TMDB API settings <ExternalLink size={15} />
-          </a>
-        </details>
-        {tmdbStatus ? <p className={tmdbStatus.toLowerCase().includes("success") || tmdbStatus.toLowerCase().includes("connected") ? "status" : "settings-error"}>{tmdbStatus}</p> : null}
-      </div>
-      <div className="panel player-settings-panel">
-        <h2>Player Features</h2>
-        <p className="muted">Global defaults for the video player. Users can still adjust these during playback.</p>
-        <div className="settings-toggles">
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={settings?.autoSkipEnabled ?? true}
-              onChange={(e) => togglePlayerSetting("autoSkipEnabled", e.target.checked)}
-            />
-            <div>
-              <strong>Enable "Skip Intro / Outro" (Experimental)</strong>
-              <p className="muted">Fetches segment timing from IntroDB and shows a skip button during playback.</p>
-            </div>
-          </label>
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={settings?.autoPlayNextEnabled ?? true}
-              onChange={(e) => togglePlayerSetting("autoPlayNextEnabled", e.target.checked)}
-            />
-            <div>
-              <strong>Default Auto-play Next Episode</strong>
-              <p className="muted">Automatically counts down to the next episode when the current one ends.</p>
-            </div>
-          </label>
         </div>
       </div>
-      <div className="admin-grid">
+    );
+  }
+
+  function renderLibrarySettings() {
+    return (
+      <div className="admin-content">
+        <div className="admin-section-title">
+          <Library size={28} />
+          <h2>Manage Libraries</h2>
+        </div>
+
         <div className="panel">
-          <h2>Libraries</h2>
+          <h3>Libraries</h3>
           <form className="library-form" onSubmit={saveLibrary}>
             <label>
               Name
@@ -463,65 +489,142 @@ export default function Admin() {
           {!libraries.length ? <p className="muted">No libraries yet. Add your first media folder above.</p> : null}
           {status ? <p className="status">{status}</p> : null}
         </div>
-        <div className="panel">
+      </div>
+    );
+  }
+
+  function renderContentSettings() {
+    const activeItems = contentTab === "all" ? filteredMedia : filteredUnmatched;
+
+    return (
+      <div className="admin-content">
+        <div className="admin-section-title">
+          <LayoutGrid size={28} />
+          <h2>Content Management</h2>
+        </div>
+
+        <div className="content-tabs">
+          <button 
+            className={`content-tab ${contentTab === "all" ? "active" : ""}`}
+            onClick={() => setContentTab("all")}
+          >
+            All Media ({mediaItems.length})
+          </button>
+          <button 
+            className={`content-tab ${contentTab === "needs-review" ? "active" : ""}`}
+            onClick={() => setContentTab("needs-review")}
+          >
+            Needs Review ({unmatched.length})
+          </button>
+        </div>
+
+        <div className="panel admin-wide-panel">
           <div className="panel-header">
-            <h2>Needs Review</h2>
-            <button
-              className="primary-button compact"
-              type="button"
-              onClick={fixAllMatches}
-              disabled={!unmatched.length || bulkTmdb.running}
-            >
-              <Search size={15} /> {bulkTmdb.running ? "TMDB Running" : "TMDB All"}
-            </button>
+            <div>
+              <h3>{contentTab === "all" ? "Scanned Media" : "Pending Metadata"}</h3>
+              <p className="muted">
+                {activeItems.length} {contentTab === "all" ? "items in your library" : "items need matching"}
+              </p>
+            </div>
+            {contentTab === "needs-review" && (
+              <button
+                className="primary-button compact"
+                type="button"
+                onClick={fixAllMatches}
+                disabled={!unmatched.length || bulkTmdb.running}
+              >
+                <Search size={15} /> {bulkTmdb.running ? "TMDB Running" : "Match All"}
+              </button>
+            )}
           </div>
-          <div className="admin-list">
-            {unmatched.map((item) => (
+
+          <div className="admin-list movie-admin-list">
+            {activeItems.map((item) => (
               <article className="review-item" key={item.id}>
                 <div>
                   <strong>{item.title}</strong>
-                  <span>{item.file_name || item.type}</span>
+                  <span>{[item.type === "tv" ? "TV Show" : "Movie", item.year, item.file_name].filter(Boolean).join(" - ")}</span>
                 </div>
-                <button className="ghost-button compact" onClick={() => fixMatch(item)}><Search size={15} /> TMDB</button>
-                <button className="ghost-button compact" onClick={() => setEditing(item)}>Edit</button>
+                <div className="row-actions">
+                  <button className="ghost-button compact" onClick={() => fixMatch(item)} title="Force TMDB Search">
+                    <Search size={15} /> TMDB
+                  </button>
+                  <button className="ghost-button compact" onClick={() => setEditing(item)}>
+                    Edit
+                  </button>
+                  <button 
+                    className="icon-button danger" 
+                    onClick={() => confirmDeleteMediaItem(item)} 
+                    aria-label={`Remove ${item.title}`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </article>
             ))}
-            {!unmatched.length ? <p className="muted">Everything has at least basic metadata.</p> : null}
+            {!activeItems.length && (
+              <p className="muted">
+                {searchQuery ? "No results match your search." : contentTab === "all" ? "Library is empty." : "All good! No items need manual review."}
+              </p>
+            )}
           </div>
         </div>
       </div>
-      <div className="panel admin-wide-panel">
-        <div className="panel-header admin-tools">
+    );
+  }
+
+  return (
+    <section className="page-pad admin-page">
+      <aside className="admin-nav">
+        <div className="admin-nav-header" style={{ padding: "0 1rem 1.5rem" }}>
+          <h1 style={{ fontSize: "1.5rem", margin: 0 }}>NicFlix Admin</h1>
+        </div>
+        <button 
+          className={`admin-nav-item ${activeTab === "general" ? "active" : ""}`}
+          onClick={() => setActiveTab("general")}
+        >
+          <Settings size={20} /> General
+        </button>
+        <button 
+          className={`admin-nav-item ${activeTab === "libraries" ? "active" : ""}`}
+          onClick={() => setActiveTab("libraries")}
+        >
+          <Library size={20} /> Libraries
+        </button>
+        <button 
+          className={`admin-nav-item ${activeTab === "content" ? "active" : ""}`}
+          onClick={() => setActiveTab("content")}
+        >
+          <LayoutGrid size={20} /> Content
+        </button>
+        <div style={{ marginTop: "auto", padding: "1.5rem 1rem" }}>
+          <div className="settings-pill connected" style={{ width: "100%", justifyContent: "center" }}>
+            <Activity size={14} /> Server Online
+          </div>
+        </div>
+      </aside>
+
+      <main className="admin-main">
+        <header className="admin-header">
           <div>
-            <h2>All Media</h2>
-            <p className="muted">{mediaItems.length} scanned item{mediaItems.length === 1 ? "" : "s"} available for metadata edits.</p>
+            <p className="muted">Control your media server, metadata, and libraries.</p>
           </div>
-          <label className="metadata-search">
-            <Search size={16} />
-            <input
-              value={mediaQuery}
-              onChange={(event) => setMediaQuery(event.target.value)}
-              placeholder="Search movies and TV shows"
+          <div className="admin-search-wrapper">
+            <Search size={18} />
+            <input 
+              className="admin-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search library and settings..."
             />
-          </label>
-        </div>
-        <div className="admin-list movie-admin-list">
-          {visibleMediaItems.map((item) => (
-            <article className="review-item" key={item.id}>
-              <div>
-                <strong>{item.title}</strong>
-                <span>{[item.type === "tv" ? "TV Show" : "Movie", item.year, item.file_name].filter(Boolean).join(" - ")}</span>
-              </div>
-              <button className="ghost-button compact" onClick={() => fixMatch(item)}><Search size={15} /> TMDB</button>
-              <button className="ghost-button compact" onClick={() => setEditing(item)}>Edit</button>
-              <button className="icon-button danger" onClick={() => confirmDeleteMediaItem(item)} aria-label={`Remove ${item.title}`}>
-                <Trash2 size={16} />
-              </button>
-            </article>
-          ))}
-          {!visibleMediaItems.length ? <p className="muted">No media items match that search.</p> : null}
-        </div>
-      </div>
+          </div>
+        </header>
+
+        {activeTab === "general" && renderGeneralSettings()}
+        {activeTab === "libraries" && renderLibrarySettings()}
+        {activeTab === "content" && renderContentSettings()}
+      </main>
+
       {editing ? (
         <div className="modal-backdrop" onClick={() => setEditing(null)}>
           <form className="modal" onSubmit={saveEdit} onClick={(event) => event.stopPropagation()}>
@@ -536,6 +639,7 @@ export default function Admin() {
           </form>
         </div>
       ) : null}
+
       {confirmDialog ? (
         <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
           <div
@@ -556,6 +660,7 @@ export default function Admin() {
           </div>
         </div>
       ) : null}
+
       {browser ? (
         <div className="modal-backdrop" onClick={() => setBrowser(null)}>
           <div className="modal folder-modal" onClick={(event) => event.stopPropagation()}>
