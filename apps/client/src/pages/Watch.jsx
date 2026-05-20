@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Maximize, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Maximize, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
 
 function formatTime(seconds = 0) {
@@ -18,6 +18,8 @@ export default function Watch() {
   const videoRef = useRef(null);
   const [tracks, setTracks] = useState({ audioTracks: [], subtitleTracks: [] });
   const [selectedAudio, setSelectedAudio] = useState("");
+  const [selectedSubtitle, setSelectedSubtitle] = useState("off");
+  const [openTrackMenu, setOpenTrackMenu] = useState(null);
   const [playbackContext, setPlaybackContext] = useState(null);
   const [episodeNav, setEpisodeNav] = useState({ previous: null, next: null });
   const [nextUp, setNextUp] = useState(null);
@@ -59,6 +61,9 @@ export default function Watch() {
     setCountdown(null);
     setPlaybackContext(null);
     setEpisodeNav({ previous: null, next: null });
+    setSelectedAudio("");
+    setSelectedSubtitle("off");
+    setOpenTrackMenu(null);
     let cancelled = false;
     apiFetch(`/files/${fileId}/tracks`)
       .then((data) => {
@@ -160,27 +165,51 @@ export default function Watch() {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !tracks.subtitleTracks.length) return undefined;
+    if (!video) return undefined;
 
     const timer = window.setTimeout(() => {
       Array.from(video.textTracks || []).forEach((track, index) => {
-        track.mode = index === 0 ? "showing" : "disabled";
+        track.mode = String(index) === selectedSubtitle ? "showing" : "disabled";
       });
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [tracks.subtitleTracks]);
+  }, [selectedSubtitle, tracks.subtitleTracks]);
 
-  function changeAudioTrack(event) {
-    const value = event.target.value;
+  useEffect(() => {
+    function closeMenus(event) {
+      if (!event.target.closest(".watch-track-menu")) {
+        setOpenTrackMenu(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeMenus);
+    return () => document.removeEventListener("pointerdown", closeMenus);
+  }, []);
+
+  function changeAudioTrack(value) {
     setSelectedAudio(value);
+    setOpenTrackMenu(null);
     const video = videoRef.current;
     const audioTracks = video?.audioTracks;
     if (!audioTracks?.length) return;
 
     Array.from(audioTracks).forEach((track, index) => {
-      track.enabled = String(index) === value;
+      track.enabled = value === "" ? index === 0 : String(index) === value;
     });
+  }
+
+  function changeSubtitleTrack(value) {
+    setSelectedSubtitle(value);
+    setOpenTrackMenu(null);
+    const video = videoRef.current;
+    Array.from(video?.textTracks || []).forEach((track, index) => {
+      track.mode = String(index) === value ? "showing" : "disabled";
+    });
+  }
+
+  function toggleTrackMenu(menu) {
+    setOpenTrackMenu((current) => (current === menu ? null : menu));
   }
 
   function toggleAutoPlayNext(event) {
@@ -255,19 +284,6 @@ export default function Watch() {
       <button className="watch-back-button" type="button" onClick={() => navigate(-1)} aria-label="Go back">
         <ArrowLeft size={19} /> Back
       </button>
-      {tracks.audioTracks.length > 1 ? (
-        <label className="watch-audio-picker">
-          Audio
-          <select value={selectedAudio} onChange={changeAudioTrack}>
-            <option value="">Default</option>
-            {tracks.audioTracks.map((track, index) => (
-              <option key={`${track.index}-${index}`} value={index}>
-                {track.label || track.language || `Audio ${index + 1}`}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
       {playbackContext ? (
         <div className="watch-title-chip" aria-live="polite">
           <strong>{playbackContext.title}</strong>
@@ -282,7 +298,6 @@ export default function Watch() {
             src={track.src}
             srcLang={track.language || "en"}
             label={track.label || `Subtitles ${index + 1}`}
-            default={index === 0}
           />
         ))}
       </video>
@@ -337,6 +352,84 @@ export default function Watch() {
             onChange={changeVolume}
             aria-label="Volume"
           />
+          <div className="watch-track-menu">
+            <button
+              className="watch-control-button"
+              type="button"
+              onClick={() => toggleTrackMenu("subtitles")}
+              aria-label="Subtitles"
+              aria-haspopup="menu"
+              aria-expanded={openTrackMenu === "subtitles"}
+              disabled={!tracks.subtitleTracks.length}
+              title="Subtitles"
+            >
+              <Captions size={23} />
+            </button>
+            {openTrackMenu === "subtitles" ? (
+              <div className="watch-track-popover" role="menu" aria-label="Subtitles">
+                <button
+                  className={selectedSubtitle === "off" ? "active" : ""}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selectedSubtitle === "off"}
+                  onClick={() => changeSubtitleTrack("off")}
+                >
+                  Off
+                </button>
+                {tracks.subtitleTracks.map((track, index) => (
+                  <button
+                    className={selectedSubtitle === String(index) ? "active" : ""}
+                    key={`${track.src}-${index}`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selectedSubtitle === String(index)}
+                    onClick={() => changeSubtitleTrack(String(index))}
+                  >
+                    {track.label || track.language || `Subtitles ${index + 1}`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="watch-track-menu">
+            <button
+              className="watch-control-button"
+              type="button"
+              onClick={() => toggleTrackMenu("audio")}
+              aria-label="Audio"
+              aria-haspopup="menu"
+              aria-expanded={openTrackMenu === "audio"}
+              disabled={!tracks.audioTracks.length}
+              title="Audio"
+            >
+              <AudioLines size={23} />
+            </button>
+            {openTrackMenu === "audio" ? (
+              <div className="watch-track-popover" role="menu" aria-label="Audio">
+                <button
+                  className={selectedAudio === "" ? "active" : ""}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selectedAudio === ""}
+                  onClick={() => changeAudioTrack("")}
+                >
+                  Default
+                </button>
+                {tracks.audioTracks.map((track, index) => (
+                  <button
+                    className={selectedAudio === String(index) ? "active" : ""}
+                    key={`${track.index}-${index}`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selectedAudio === String(index)}
+                    onClick={() => changeAudioTrack(String(index))}
+                  >
+                    {track.label || track.language || `Audio ${index + 1}`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <button className="watch-control-button" type="button" onClick={toggleFullscreen} aria-label="Fullscreen">
             <Maximize size={23} />
           </button>

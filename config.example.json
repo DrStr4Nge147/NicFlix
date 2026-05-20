@@ -1,3 +1,5 @@
 {
-  "libraries": []
+  "libraries": [],
+  "tmdbApiKeyEncrypted": "",
+  "tmdbDisconnected": false
 }

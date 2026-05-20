@@ -15,6 +15,9 @@ apps/*/dist/
 apps/*/.vite/
 apps/*/node_modules/.vite/
 
+# Local documentation
+docs/
+
 # Runtime data
 data/*
 !data/.gitkeep

@@ -5,7 +5,8 @@ import mime from "mime-types";
 import ffmpeg from "fluent-ffmpeg";
 import { db, nowIso, rowToMedia } from "../db/database.js";
 import { scanLibrary } from "../scanner/scanner.js";
-import { searchTmdb, fetchMovieMetadata, fetchTvMetadata } from "../metadata/tmdb.js";
+import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManagedTmdbKey } from "../config/appConfig.js";
+import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
 
 export const api = express.Router();
 
@@ -31,6 +32,22 @@ function getPlayableFile(fileId) {
   return db.prepare("SELECT * FROM files WHERE id = ?").get(fileId);
 }
 
+function preferredEpisodeFileJoinSql() {
+  return `
+    JOIN files f ON f.id = (
+      SELECT candidate.id
+      FROM files candidate
+      LEFT JOIN watch_progress candidate_wp ON candidate_wp.file_id = candidate.id
+      WHERE candidate.episode_id = e.id
+      ORDER BY
+        CASE WHEN candidate_wp.position > 30 AND candidate_wp.watched = 0 THEN 0 ELSE 1 END,
+        CASE WHEN candidate.file_name LIKE '%[English Dub]%' THEN 1 ELSE 0 END,
+        candidate.id
+      LIMIT 1
+    )
+  `;
+}
+
 function getSeriesNavigation(fileId) {
   const current = db.prepare(`
     SELECT f.*, e.season_number, e.episode_number
@@ -44,7 +61,7 @@ function getSeriesNavigation(fileId) {
   const next = db.prepare(`
     SELECT f.id AS file_id, e.title AS episode_title, e.season_number, e.episode_number
     FROM episodes e
-    JOIN files f ON f.episode_id = e.id
+    ${preferredEpisodeFileJoinSql()}
     WHERE e.media_item_id = ?
       AND (
         e.season_number > ?
@@ -57,7 +74,7 @@ function getSeriesNavigation(fileId) {
   const previous = db.prepare(`
     SELECT f.id AS file_id, e.title AS episode_title, e.season_number, e.episode_number
     FROM episodes e
-    JOIN files f ON f.episode_id = e.id
+    ${preferredEpisodeFileJoinSql()}
     WHERE e.media_item_id = ?
       AND (
         e.season_number < ?
@@ -117,6 +134,78 @@ function listMedia(type, limit = 60) {
   `).all(type, limit).map(mediaWithFile);
 }
 
+async function refreshTvEpisodeMetadata(itemId, tmdbId, seasons = []) {
+  const insertSeason = db.prepare(`
+    INSERT OR IGNORE INTO seasons (media_item_id, season_number, title, overview, poster_path)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const updateSeason = db.prepare(`
+    UPDATE seasons SET
+      title = COALESCE(NULLIF(title, ?), ?),
+      overview = COALESCE(overview, ?),
+      poster_path = COALESCE(poster_path, ?)
+    WHERE media_item_id = ? AND season_number = ?
+  `);
+  const updateEpisode = db.prepare(`
+    UPDATE episodes SET
+      title = COALESCE(NULLIF(title, ?), ?),
+      overview = COALESCE(overview, ?),
+      still_path = COALESCE(still_path, ?),
+      air_date = COALESCE(air_date, ?)
+    WHERE media_item_id = ? AND season_number = ? AND episode_number = ?
+  `);
+
+  for (const season of seasons) {
+    insertSeason.run(itemId, season.season_number, season.name, season.overview || null, season.poster_path || null);
+  }
+
+  const existingSeasonNumbers = db.prepare(`
+    SELECT DISTINCT season_number
+    FROM episodes
+    WHERE media_item_id = ?
+    ORDER BY season_number
+  `).all(itemId).map((row) => row.season_number);
+
+  for (const seasonNumber of existingSeasonNumbers) {
+    let seasonMetadata = null;
+    try {
+      seasonMetadata = await fetchTvSeasonMetadata(tmdbId, seasonNumber);
+    } catch (error) {
+      console.warn(`TMDB season lookup failed for ${tmdbId} season ${seasonNumber}:`, error.message);
+    }
+    if (!seasonMetadata) continue;
+
+    insertSeason.run(
+      itemId,
+      seasonNumber,
+      seasonMetadata.title,
+      seasonMetadata.overview,
+      seasonMetadata.posterPath
+    );
+    updateSeason.run(
+      `Season ${seasonNumber}`,
+      seasonMetadata.title,
+      seasonMetadata.overview,
+      seasonMetadata.posterPath,
+      itemId,
+      seasonNumber
+    );
+
+    for (const episode of seasonMetadata.episodes) {
+      updateEpisode.run(
+        `Episode ${episode.episodeNumber}`,
+        episode.title,
+        episode.overview,
+        episode.stillPath,
+        episode.airDate,
+        itemId,
+        seasonNumber,
+        episode.episodeNumber
+      );
+    }
+  }
+}
+
 function windowsDriveRoots() {
   const roots = [];
   for (let code = 65; code <= 90; code += 1) {
@@ -128,6 +217,77 @@ function windowsDriveRoots() {
 
 api.get("/health", (_req, res) => {
   res.json({ ok: true, app: "NicFlix" });
+});
+
+api.get("/admin/settings", (_req, res) => {
+  const config = readAppConfig();
+  const apiKey = getTmdbApiKey();
+  const appManaged = hasAppManagedTmdbKey();
+  res.json({
+    settings: {
+      tmdbConfigured: hasTmdbKey(),
+      tmdbApiKeyMasked: maskSecret(apiKey),
+      tmdbApiKeySource: config.tmdbDisconnected ? "none" : (appManaged ? "app" : (process.env.TMDB_API_KEY ? "env" : "none")),
+      tmdbDisconnected: config.tmdbDisconnected,
+      canDisconnectTmdb: hasTmdbKey() || appManaged || Boolean(process.env.TMDB_API_KEY)
+    }
+  });
+});
+
+api.patch("/admin/settings/tmdb", async (req, res, next) => {
+  try {
+    const tmdbApiKey = String(req.body.tmdbApiKey || "").trim();
+    const testOnly = req.body.testOnly === true;
+
+    if (!tmdbApiKey) {
+      writeAppConfig({ tmdbApiKey: "", tmdbDisconnected: true });
+      res.json({
+        settings: {
+          tmdbConfigured: hasTmdbKey(),
+          tmdbApiKeyMasked: maskSecret(getTmdbApiKey()),
+          tmdbApiKeySource: "none",
+          tmdbDisconnected: true,
+          canDisconnectTmdb: false
+        },
+        test: { ok: true, message: "TMDB API key cleared from app settings." }
+      });
+      return;
+    }
+
+    const test = await testTmdbApiKey(tmdbApiKey);
+    if (testOnly || !test.ok) {
+      res.status(test.ok ? 200 : 400).json({ test });
+      return;
+    }
+
+    writeAppConfig({ tmdbApiKey, tmdbDisconnected: false });
+    res.json({
+      settings: {
+        tmdbConfigured: hasTmdbKey(),
+        tmdbApiKeyMasked: maskSecret(tmdbApiKey),
+        tmdbApiKeySource: "app",
+        tmdbDisconnected: false,
+        canDisconnectTmdb: true
+      },
+      test
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.delete("/admin/settings/tmdb", (_req, res) => {
+  writeAppConfig({ tmdbApiKey: "", tmdbDisconnected: true });
+  res.json({
+    settings: {
+      tmdbConfigured: false,
+      tmdbApiKeyMasked: "",
+      tmdbApiKeySource: "none",
+      tmdbDisconnected: true,
+      canDisconnectTmdb: false
+    },
+    message: "TMDB API key disconnected."
+  });
 });
 
 api.get("/fs/directories", async (req, res, next) => {
@@ -159,27 +319,32 @@ api.get("/libraries", (_req, res) => {
   res.json({ libraries: db.prepare("SELECT * FROM libraries ORDER BY name").all() });
 });
 
-api.post("/libraries", (req, res) => {
-  const { name, type, path: libraryPath } = req.body;
-  if (!name || !type || !libraryPath) {
-    res.status(400).json({ error: "name, type, and path are required" });
-    return;
+api.post("/libraries", async (req, res, next) => {
+  try {
+    const { name, type, path: libraryPath } = req.body;
+    if (!name || !type || !libraryPath) {
+      res.status(400).json({ error: "name, type, and path are required" });
+      return;
+    }
+    if (!["movies", "tv"].includes(type)) {
+      res.status(400).json({ error: "type must be movies or tv" });
+      return;
+    }
+    const result = db.prepare(`
+      INSERT INTO libraries (name, type, path, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET name = excluded.name, type = excluded.type
+    `).run(name, type, libraryPath, nowIso());
+    const library = db.prepare("SELECT * FROM libraries WHERE path = ?").get(libraryPath)
+      || db.prepare("SELECT * FROM libraries WHERE id = ?").get(result.lastInsertRowid);
+    const scan = await scanLibrary(library.id);
+    res.status(201).json({ library, scan });
+  } catch (error) {
+    next(error);
   }
-  if (!["movies", "tv"].includes(type)) {
-    res.status(400).json({ error: "type must be movies or tv" });
-    return;
-  }
-  const result = db.prepare(`
-    INSERT INTO libraries (name, type, path, created_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(path) DO UPDATE SET name = excluded.name, type = excluded.type
-  `).run(name, type, libraryPath, nowIso());
-  const library = db.prepare("SELECT * FROM libraries WHERE path = ?").get(libraryPath)
-    || db.prepare("SELECT * FROM libraries WHERE id = ?").get(result.lastInsertRowid);
-  res.status(201).json({ library });
 });
 
-api.patch("/libraries/:id", (req, res) => {
+api.patch("/libraries/:id", async (req, res, next) => {
   const existing = db.prepare("SELECT * FROM libraries WHERE id = ?").get(req.params.id);
   if (!existing) {
     res.status(404).json({ error: "Library not found" });
@@ -201,13 +366,15 @@ api.patch("/libraries/:id", (req, res) => {
   try {
     db.prepare("UPDATE libraries SET name = ?, type = ?, path = ? WHERE id = ?")
       .run(name, type, libraryPath, req.params.id);
-    res.json({ library: db.prepare("SELECT * FROM libraries WHERE id = ?").get(req.params.id) });
+    const library = db.prepare("SELECT * FROM libraries WHERE id = ?").get(req.params.id);
+    const scan = await scanLibrary(library.id);
+    res.json({ library, scan });
   } catch (error) {
     if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
       res.status(409).json({ error: "A library with that path already exists" });
       return;
     }
-    throw error;
+    next(error);
   }
 });
 
@@ -347,7 +514,17 @@ api.get("/shows/:id", (req, res) => {
   const episodes = db.prepare(`
     SELECT e.*, f.id AS file_id, f.duration AS file_duration, wp.position, wp.watched
     FROM episodes e
-    LEFT JOIN files f ON f.episode_id = e.id
+    LEFT JOIN files f ON f.id = (
+      SELECT candidate.id
+      FROM files candidate
+      LEFT JOIN watch_progress candidate_wp ON candidate_wp.file_id = candidate.id
+      WHERE candidate.episode_id = e.id
+      ORDER BY
+        CASE WHEN candidate_wp.position > 30 AND candidate_wp.watched = 0 THEN 0 ELSE 1 END,
+        CASE WHEN candidate.file_name LIKE '%[English Dub]%' THEN 1 ELSE 0 END,
+        candidate.id
+      LIMIT 1
+    )
     LEFT JOIN watch_progress wp ON wp.file_id = f.id
     WHERE e.media_item_id = ?
     ORDER BY e.season_number, e.episode_number
@@ -374,7 +551,17 @@ api.get("/shows/:id/seasons", (req, res) => {
 api.get("/search", (req, res) => {
   const q = String(req.query.q || "").trim();
   if (!q) {
-    res.json({ results: [] });
+    const results = db.prepare(`
+      SELECT m.*, f.id AS file_id, f.duration AS file_duration, wp.position, wp.watched
+      FROM media_items m
+      LEFT JOIN files f ON f.media_item_id = m.id
+      LEFT JOIN watch_progress wp ON wp.file_id = f.id
+      WHERE m.ignored = 0
+      GROUP BY m.id
+      ORDER BY m.added_at DESC
+      LIMIT 200
+    `).all().map(mediaWithFile);
+    res.json({ results });
     return;
   }
   const like = `%${q}%`;
@@ -531,11 +718,24 @@ api.post("/progress/:fileId", (req, res) => {
   res.json({ progress: db.prepare("SELECT * FROM watch_progress WHERE file_id = ?").get(req.params.fileId) });
 });
 
+api.delete("/progress/:fileId", (req, res) => {
+  db.prepare("DELETE FROM watch_progress WHERE file_id = ?").run(req.params.fileId);
+  res.json({ ok: true });
+});
+
 api.get("/admin/unmatched", (_req, res) => {
   const items = db.prepare(`
     SELECT m.*, f.id AS file_id, f.file_name
     FROM media_items m
-    LEFT JOIN files f ON f.media_item_id = m.id
+    LEFT JOIN files f ON f.id = (
+      SELECT candidate.id
+      FROM files candidate
+      WHERE candidate.media_item_id = m.id
+      ORDER BY
+        CASE WHEN candidate.episode_id IS NOT NULL THEN 0 ELSE 1 END,
+        candidate.id
+      LIMIT 1
+    )
     WHERE m.tmdb_id IS NULL OR m.overview IS NULL
     GROUP BY m.id
     ORDER BY m.added_at DESC
@@ -546,10 +746,19 @@ api.get("/admin/unmatched", (_req, res) => {
 api.get("/admin/media", (req, res) => {
   const requestedType = String(req.query.type || "").trim();
   const type = requestedType === "tv" ? "tv" : "movie";
+  const filePreferenceSql = type === "tv"
+    ? "CASE WHEN candidate.episode_id IS NOT NULL THEN 0 ELSE 1 END, candidate.id"
+    : "CASE WHEN candidate.episode_id IS NULL THEN 0 ELSE 1 END, candidate.id";
   const items = db.prepare(`
     SELECT m.*, f.id AS file_id, f.file_name
     FROM media_items m
-    LEFT JOIN files f ON f.media_item_id = m.id AND f.episode_id IS NULL
+    LEFT JOIN files f ON f.id = (
+      SELECT candidate.id
+      FROM files candidate
+      WHERE candidate.media_item_id = m.id
+      ORDER BY ${filePreferenceSql}
+      LIMIT 1
+    )
     WHERE m.type = ?
     GROUP BY m.id
     ORDER BY lower(m.title)
@@ -570,13 +779,18 @@ api.get("/admin/tmdb-search", async (req, res, next) => {
 
 api.post("/admin/media/:id/fix-match", async (req, res, next) => {
   try {
+    if (!hasTmdbKey()) {
+      res.status(400).json({ error: "TMDB API key is missing. Open Admin settings and add your free TMDB API key." });
+      return;
+    }
+
     const item = db.prepare("SELECT * FROM media_items WHERE id = ?").get(req.params.id);
     if (!item) {
       res.status(404).json({ error: "Media item not found" });
       return;
     }
     const metadata = item.type === "tv"
-      ? await fetchTvMetadata(req.body.title || item.title)
+      ? await fetchTvMetadata(req.body.title || item.title, req.body.year || item.year)
       : await fetchMovieMetadata(req.body.title || item.title, req.body.year || item.year);
     if (!metadata) {
       res.status(404).json({ error: "No TMDB match found" });
@@ -600,6 +814,9 @@ api.post("/admin/media/:id/fix-match", async (req, res, next) => {
       nowIso(),
       item.id
     );
+    if (item.type === "tv") {
+      await refreshTvEpisodeMetadata(item.id, metadata.tmdbId, metadata.seasons);
+    }
     res.json({ media: mediaWithFile(db.prepare("SELECT * FROM media_items WHERE id = ?").get(item.id)) });
   } catch (error) {
     next(error);
@@ -617,6 +834,28 @@ api.patch("/admin/media/:id", (req, res) => {
   db.prepare(`UPDATE media_items SET ${setSql}, updated_at = ? WHERE id = ?`)
     .run(...updates.map(([, value]) => value), nowIso(), req.params.id);
   res.json({ media: mediaWithFile(db.prepare("SELECT * FROM media_items WHERE id = ?").get(req.params.id)) });
+});
+
+api.delete("/admin/media/:id", (req, res) => {
+  const item = db.prepare("SELECT * FROM media_items WHERE id = ?").get(req.params.id);
+  if (!item) {
+    res.status(404).json({ error: "Media item not found" });
+    return;
+  }
+
+  const removeMediaItem = db.transaction((mediaItemId) => {
+    const fileIds = db.prepare("SELECT id FROM files WHERE media_item_id = ?").all(mediaItemId).map((row) => row.id);
+    if (fileIds.length) {
+      db.prepare(`DELETE FROM watch_progress WHERE file_id IN (${fileIds.map(() => "?").join(",")})`).run(...fileIds);
+    }
+    db.prepare("DELETE FROM files WHERE media_item_id = ?").run(mediaItemId);
+    db.prepare("DELETE FROM episodes WHERE media_item_id = ?").run(mediaItemId);
+    db.prepare("DELETE FROM seasons WHERE media_item_id = ?").run(mediaItemId);
+    db.prepare("DELETE FROM media_items WHERE id = ?").run(mediaItemId);
+  });
+
+  removeMediaItem(item.id);
+  res.json({ ok: true });
 });
 
 api.patch("/admin/files/:id/ignore", (req, res) => {

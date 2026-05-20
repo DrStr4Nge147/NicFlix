@@ -1,3 +1,0 @@
-1. Create an install.bat so that the user can just double click it and it will install everything.
-2. Make this a git repo so that when the user clone this and one-click install, it will install everything no problem and make sure all sensitive data are not included.
-3. In the player controls, please add a subtitle button where you can select available subtitle and an audio button where you can also select available audio.

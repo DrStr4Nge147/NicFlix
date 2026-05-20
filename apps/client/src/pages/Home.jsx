@@ -18,6 +18,19 @@ export default function Home() {
     apiFetch("/home").then((data) => setRows(data.rows)).finally(() => setLoading(false));
   }, []);
 
+  const removeContinueItem = async (item) => {
+    if (!item.file_id) return;
+    await apiFetch(`/progress/${item.file_id}`, {
+      method: "POST",
+      body: JSON.stringify({ position: 0, duration: item.file_duration || item.duration || 0, watched: false })
+    });
+    setRows((currentRows) => currentRows
+      .map((row) => row.title === "Continue Watching"
+        ? { ...row, items: row.items.filter((rowItem) => rowItem.file_id !== item.file_id) }
+        : row)
+      .filter((row) => row.items.length));
+  };
+
   if (loading) return <div className="empty-state">Loading your library...</div>;
 
   return (
@@ -44,7 +57,14 @@ export default function Home() {
         </div>
       )}
       <div className="content-stack">
-        {rows.map((row) => <MediaRow key={row.title} title={row.title} items={row.items} />)}
+        {rows.map((row) => (
+          <MediaRow
+            key={row.title}
+            title={row.title}
+            items={row.items}
+            onRemoveItem={row.title === "Continue Watching" ? removeContinueItem : undefined}
+          />
+        ))}
       </div>
     </>
   );

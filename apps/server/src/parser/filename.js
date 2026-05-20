@@ -6,15 +6,21 @@ const releaseTags = [
   "hevc", "aac", "dts", "yify", "rarbg", "repack", "proper", "extended"
 ];
 
-function cleanTitle(input) {
+function cleanTitle(input, { stripTrailingEpisode = false } = {}) {
   const tagPattern = new RegExp(`\\b(${releaseTags.map(escapeRegExp).join("|")})\\b`, "ig");
-  return input
+  const cleaned = input
     .replace(/[._]+/g, " ")
     .replace(/\s+-\s+/g, " ")
     .replace(tagPattern, " ")
     .replace(/\[[^\]]*]/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+    .replace(/\s{2,}/g, " ");
+
+  return (stripTrailingEpisode
+    ? cleaned
+      .replace(/\b(episode|ep)\s*\d{1,3}\b/ig, " ")
+      .replace(/\s+\d{1,3}\s*$/g, " ")
+    : cleaned
+  ).replace(/\s{2,}/g, " ").trim();
 }
 
 function escapeRegExp(value) {
@@ -33,22 +39,23 @@ export function parseMediaFile(filePath, libraryType) {
     if (match?.groups) {
       return {
         type: "tv",
-        title: cleanTitle(match.groups.title),
+        title: cleanTitle(match.groups.title, { stripTrailingEpisode: true }),
         seasonNumber: Number(match.groups.season),
         episodeNumber: Number(match.groups.episode)
       };
     }
   }
 
-  const yearMatch = base.match(/(?:^|[\s.(])(?<year>(19|20)\d{2})(?:[\s.)]|$)/);
-  const titlePart = yearMatch ? base.slice(0, yearMatch.index).trim() : base;
+  const normalizedBase = base.replace(/[._]+/g, " ");
+  const yearMatches = [...normalizedBase.matchAll(/\b(19|20)\d{2}\b/g)];
+  const yearMatch = [...yearMatches].reverse().find((match) => match.index > 0) || null;
+  const titlePart = yearMatch ? normalizedBase.slice(0, yearMatch.index).trim() : normalizedBase;
 
   return {
     type: libraryType === "tv" ? "tv" : "movie",
-    title: cleanTitle(titlePart || base),
-    year: yearMatch ? Number(yearMatch.groups.year) : null,
+    title: cleanTitle(titlePart || base, { stripTrailingEpisode: libraryType === "tv" }),
+    year: yearMatch ? Number(yearMatch[0]) : null,
     seasonNumber: null,
     episodeNumber: null
   };
 }
-

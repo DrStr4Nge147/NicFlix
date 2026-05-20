@@ -192,6 +192,11 @@ h2 {
   background: rgba(255, 255, 255, .13);
 }
 
+.danger-button {
+  color: #fecaca;
+  background: rgba(230, 59, 59, .16);
+}
+
 .ghost-button.compact {
   min-height: 2.1rem;
   padding: 0 .65rem;
@@ -235,6 +240,11 @@ h2 {
   scrollbar-width: thin;
 }
 
+.media-card-shell {
+  position: relative;
+  min-width: 0;
+}
+
 .media-card {
   display: block;
   min-width: 0;
@@ -250,7 +260,7 @@ h2 {
   transition: transform .16s ease, box-shadow .16s ease;
 }
 
-.media-card:hover .poster {
+.media-card-shell:hover .poster {
   transform: translateY(-.2rem) scale(1.025);
   box-shadow: 0 24px 58px rgba(0, 0, 0, .44);
 }
@@ -284,6 +294,35 @@ h2 {
   color: #11131a;
   background: #fff;
   border-radius: 999px;
+}
+
+.card-remove-button {
+  position: absolute;
+  top: .45rem;
+  right: .45rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: #fff;
+  background: rgba(8, 9, 13, .78);
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 999px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+  opacity: .9;
+  transition: opacity .16s ease, transform .16s ease, background .16s ease;
+  z-index: 2;
+}
+
+.media-card-shell:hover .card-remove-button,
+.card-remove-button:focus-visible {
+  transform: translateY(0);
+}
+
+.card-remove-button:hover {
+  opacity: 1;
+  background: rgba(230, 59, 59, .9);
 }
 
 .card-meta {
@@ -518,26 +557,6 @@ h2 {
   transition: opacity .2s ease, background .16s ease;
 }
 
-.watch-audio-picker {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  z-index: 10;
-  display: inline-flex;
-  gap: .5rem;
-  align-items: center;
-  min-height: 2.4rem;
-  padding: 0 .75rem;
-  color: #fff;
-  background: rgba(8, 9, 13, .68);
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: .5rem;
-  backdrop-filter: blur(14px);
-  font-weight: 800;
-  opacity: 1;
-  transition: opacity .2s ease;
-}
-
 .watch-title-chip {
   position: absolute;
   top: 1.05rem;
@@ -576,19 +595,6 @@ h2 {
   font-weight: 750;
 }
 
-.watch-audio-picker select {
-  max-width: min(15rem, 45vw);
-  color: #fff;
-  background: transparent;
-  border: 0;
-  outline: 0;
-  font-weight: 750;
-}
-
-.watch-audio-picker option {
-  color: #11131a;
-}
-
 .watch-controls {
   position: absolute;
   left: clamp(.75rem, 2vw, 2rem);
@@ -603,7 +609,6 @@ h2 {
 
 .watch-page.controls-hidden::after,
 .watch-page.controls-hidden .watch-back-button,
-.watch-page.controls-hidden .watch-audio-picker,
 .watch-page.controls-hidden .watch-title-chip,
 .watch-page.controls-hidden .watch-controls {
   pointer-events: none;
@@ -663,6 +668,59 @@ h2 {
   width: 6rem;
   accent-color: #fff;
   cursor: pointer;
+}
+
+.watch-track-menu {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.watch-track-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + .55rem);
+  z-index: 20;
+  display: grid;
+  gap: .2rem;
+  width: max-content;
+  min-width: 11rem;
+  max-width: min(18rem, calc(100vw - 2rem));
+  max-height: min(22rem, 58vh);
+  overflow: auto;
+  padding: .35rem;
+  background: rgba(15, 17, 24, .94);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: .5rem;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, .52);
+  backdrop-filter: blur(18px);
+}
+
+.watch-track-popover button {
+  min-height: 2.15rem;
+  width: 100%;
+  padding: 0 .65rem;
+  color: #dfe3ec;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: .35rem;
+  font-size: .9rem;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-track-popover button:hover,
+.watch-track-popover button:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, .12);
+}
+
+.watch-track-popover button.active {
+  color: #11131a;
+  background: #fff;
 }
 
 .next-up-panel {
@@ -756,6 +814,10 @@ h2 {
   margin-top: 1rem;
 }
 
+.tmdb-panel {
+  margin-bottom: 1rem;
+}
+
 .panel {
   padding: 1rem;
   border: 1px solid rgba(255, 255, 255, .1);
@@ -805,6 +867,104 @@ h2 {
   outline: 0;
 }
 
+.settings-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  min-height: 2rem;
+  padding: 0 .65rem;
+  color: #fecaca;
+  background: rgba(230, 59, 59, .16);
+  border-radius: .45rem;
+  font-size: .86rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.settings-pill.connected {
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, .15);
+}
+
+.tmdb-header-actions {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.tmdb-settings-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .75rem;
+  align-items: end;
+  margin-top: .9rem;
+}
+
+.tmdb-settings-form label {
+  display: grid;
+  gap: .35rem;
+  color: #cfd5e1;
+  font-weight: 750;
+}
+
+.secret-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .5rem;
+}
+
+.secret-input input {
+  width: 100%;
+  min-height: 2.55rem;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: .45rem;
+  background: rgba(255, 255, 255, .07);
+  color: #fff;
+  padding: 0 .7rem;
+}
+
+.tmdb-button-row {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.setup-guide {
+  margin-top: .9rem;
+  padding-top: .9rem;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+}
+
+.setup-guide summary {
+  color: #fff;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.setup-guide ol {
+  display: grid;
+  gap: .45rem;
+  margin: .8rem 0;
+  padding-left: 1.35rem;
+  color: #cfd5e1;
+  line-height: 1.5;
+}
+
+.guide-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  color: #ffb4b4;
+  font-weight: 850;
+}
+
+.settings-error {
+  margin: .8rem 0 0;
+  color: #fecaca;
+}
+
 .library-line,
 .review-item {
   display: grid;
@@ -830,7 +990,7 @@ h2 {
 }
 
 .review-item {
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
 }
 
 .movie-admin-list {
@@ -1042,6 +1202,15 @@ h2 {
   width: min(42rem, 100%);
 }
 
+.confirm-modal {
+  width: min(28rem, 100%);
+}
+
+.confirm-modal p {
+  margin-bottom: .2rem;
+  line-height: 1.55;
+}
+
 .current-folder {
   min-height: 2.55rem;
   display: flex;
@@ -1134,11 +1303,35 @@ h2 {
   }
 
   .library-form,
+  .tmdb-settings-form,
   .library-line {
     grid-template-columns: 1fr;
   }
 
+  .tmdb-button-row {
+    align-items: stretch;
+  }
+
   .path-picker {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .watch-control-row {
+    gap: .35rem;
+  }
+
+  .watch-control-button {
+    width: 2.1rem;
+    height: 2.1rem;
+  }
+
+  .watch-time {
+    font-size: .78rem;
+  }
+
+  .watch-volume {
+    display: none;
   }
 }

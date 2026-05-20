@@ -4,11 +4,12 @@ import { db, nowIso } from "../db/database.js";
 import { readAppConfig } from "../config/appConfig.js";
 import { parseMediaFile } from "../parser/filename.js";
 import { probeFile } from "./ffprobe.js";
-import { fetchMovieMetadata, fetchTvMetadata, hasTmdbKey } from "../metadata/tmdb.js";
+import { fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey } from "../metadata/tmdb.js";
 
 const mediaExtensions = new Set([".mp4", ".mkv", ".mov", ".avi", ".webm"]);
 const subtitleExtensions = new Set([".srt"]);
 const metadataCache = new Map();
+const seasonMetadataCache = new Map();
 
 async function walk(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -63,12 +64,28 @@ async function enrichMedia(type, title, year) {
   if (metadataCache.has(cacheKey)) return metadataCache.get(cacheKey);
 
   try {
-    const metadata = type === "tv" ? await fetchTvMetadata(title) : await fetchMovieMetadata(title, year);
+    const metadata = type === "tv" ? await fetchTvMetadata(title, year) : await fetchMovieMetadata(title, year);
     metadataCache.set(cacheKey, metadata);
     return metadata;
   } catch (error) {
     console.warn(`TMDB lookup failed for ${title}:`, error.message);
     metadataCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+async function enrichSeason(tmdbId, seasonNumber) {
+  if (!hasTmdbKey() || !tmdbId || !seasonNumber) return null;
+  const cacheKey = `${tmdbId}:${seasonNumber}`;
+  if (seasonMetadataCache.has(cacheKey)) return seasonMetadataCache.get(cacheKey);
+
+  try {
+    const metadata = await fetchTvSeasonMetadata(tmdbId, seasonNumber);
+    seasonMetadataCache.set(cacheKey, metadata);
+    return metadata;
+  } catch (error) {
+    console.warn(`TMDB season lookup failed for ${tmdbId} season ${seasonNumber}:`, error.message);
+    seasonMetadataCache.set(cacheKey, null);
     return null;
   }
 }
@@ -196,13 +213,39 @@ async function upsertMedia({ library, parsed }) {
   return item;
 }
 
-function upsertEpisode(mediaItem, parsed) {
+async function upsertEpisode(mediaItem, parsed) {
   if (parsed.type !== "tv" || !parsed.seasonNumber || !parsed.episodeNumber) return null;
+
+  const seasonMetadata = await enrichSeason(mediaItem.tmdb_id, parsed.seasonNumber);
+  const episodeMetadata = seasonMetadata?.episodes?.find((episode) => episode.episodeNumber === parsed.episodeNumber);
 
   db.prepare(`
     INSERT OR IGNORE INTO seasons (media_item_id, season_number, title, overview, poster_path)
     VALUES (?, ?, ?, ?, ?)
-  `).run(mediaItem.id, parsed.seasonNumber, `Season ${parsed.seasonNumber}`, null, null);
+  `).run(
+    mediaItem.id,
+    parsed.seasonNumber,
+    seasonMetadata?.title || `Season ${parsed.seasonNumber}`,
+    seasonMetadata?.overview || null,
+    seasonMetadata?.posterPath || null
+  );
+
+  if (seasonMetadata) {
+    db.prepare(`
+      UPDATE seasons SET
+        title = COALESCE(NULLIF(title, ?), ?),
+        overview = COALESCE(overview, ?),
+        poster_path = COALESCE(poster_path, ?)
+      WHERE media_item_id = ? AND season_number = ?
+    `).run(
+      `Season ${parsed.seasonNumber}`,
+      seasonMetadata.title,
+      seasonMetadata.overview,
+      seasonMetadata.posterPath,
+      mediaItem.id,
+      parsed.seasonNumber
+    );
+  }
 
   const season = db.prepare("SELECT * FROM seasons WHERE media_item_id = ? AND season_number = ?")
     .get(mediaItem.id, parsed.seasonNumber);
@@ -217,11 +260,31 @@ function upsertEpisode(mediaItem, parsed) {
     season.id,
     parsed.seasonNumber,
     parsed.episodeNumber,
-    `Episode ${parsed.episodeNumber}`,
-    null,
-    null,
-    null
+    episodeMetadata?.title || `Episode ${parsed.episodeNumber}`,
+    episodeMetadata?.overview || null,
+    episodeMetadata?.stillPath || null,
+    episodeMetadata?.airDate || null
   );
+
+  if (episodeMetadata) {
+    db.prepare(`
+      UPDATE episodes SET
+        title = COALESCE(NULLIF(title, ?), ?),
+        overview = COALESCE(overview, ?),
+        still_path = COALESCE(still_path, ?),
+        air_date = COALESCE(air_date, ?)
+      WHERE media_item_id = ? AND season_number = ? AND episode_number = ?
+    `).run(
+      `Episode ${parsed.episodeNumber}`,
+      episodeMetadata.title,
+      episodeMetadata.overview,
+      episodeMetadata.stillPath,
+      episodeMetadata.airDate,
+      mediaItem.id,
+      parsed.seasonNumber,
+      parsed.episodeNumber
+    );
+  }
 
   return db.prepare(`
     SELECT * FROM episodes
@@ -245,7 +308,7 @@ export async function scanLibrary(libraryId) {
     const stats = await fs.stat(filePath);
     const parsed = parseMediaFile(filePath, library.type);
     const mediaItem = await upsertMedia({ library, parsed });
-    const episode = upsertEpisode(mediaItem, parsed);
+    const episode = await upsertEpisode(mediaItem, parsed);
     const technical = await probeFile(filePath);
     const externalSubtitles = await findExternalSubtitles(filePath);
     const existingFile = db.prepare("SELECT id FROM files WHERE file_path = ?").get(filePath);
