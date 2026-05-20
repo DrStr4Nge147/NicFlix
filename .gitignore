@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+apps/*/node_modules/
+
+# Local environment and machine-specific config
+.env
+.env.*.local
+apps/server/.env
+config.json
+
+# Build output and caches
+dist/
+apps/*/dist/
+.vite/
+apps/*/.vite/
+apps/*/node_modules/.vite/
+
+# Runtime data
+data/*
+!data/.gitkeep
+!data/backdrops/
+data/backdrops/*
+!data/backdrops/.gitkeep
+!data/posters/
+data/posters/*
+!data/posters/.gitkeep
+!data/thumbnails/
+data/thumbnails/*
+!data/thumbnails/.gitkeep
+
+# Logs and OS/editor files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
