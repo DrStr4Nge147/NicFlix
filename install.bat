@@ -68,9 +68,9 @@ echo.
 echo Installation complete.
 echo.
 echo Next steps:
-echo 1. Edit config.json so the library paths point to your media folders.
-echo 2. Edit apps\server\.env if you want to add a TMDB API key.
-echo 3. Double click "Start NicFlix.bat" to run the app.
+echo 1. Edit apps\server\.env if you want to add a TMDB API key.
+echo 2. Double click "Start NicFlix.bat" to run the app.
+echo 3. Open Admin in NicFlix and add your media folders.
 echo.
 
 pause

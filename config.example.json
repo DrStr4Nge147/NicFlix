@@ -1,14 +1,3 @@
 {
-  "libraries": [
-    {
-      "type": "movies",
-      "name": "Movies",
-      "path": "C:/Media/Movies"
-    },
-    {
-      "type": "tv",
-      "name": "TV Shows",
-      "path": "C:/Media/TV Shows"
-    }
-  ]
+  "libraries": []
 }

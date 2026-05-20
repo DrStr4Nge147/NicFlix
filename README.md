@@ -13,23 +13,24 @@ The installer creates local files from the checked-in examples and installs all 
 - `apps/server/.env` from `apps/server/.env.example`
 - `config.json` from `config.example.json`
 
-After install, edit `config.json` so the library paths point to your media folders. Add a TMDB API key to `apps/server/.env` if you want metadata lookup.
+After install, add a TMDB API key to `apps/server/.env` if you want metadata lookup.
 
 Then double click `Start NicFlix.bat`.
+
+Open Admin in NicFlix to add your media folders and scan them.
 
 ### Manual setup
 
 1. Copy `apps/server/.env.example` to `apps/server/.env`.
 2. Copy `config.example.json` to `config.json`.
 3. Add your TMDB API key if you want metadata lookup.
-4. Edit `config.json` so the library paths point to your media folders.
-5. Install dependencies:
+4. Install dependencies:
 
 ```sh
 npm install
 ```
 
-6. Start both apps:
+5. Start both apps:
 
 ```sh
 npm run dev
@@ -37,6 +38,8 @@ npm run dev
 
 Frontend: `http://localhost:5173`  
 Backend: `http://localhost:4000/api`
+
+Open Admin in NicFlix to add your media folders and scan them.
 
 ## Notes
 
