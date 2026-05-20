@@ -32,7 +32,8 @@ const emptyLibraryForm = {
 export default function Admin() {
   const [activeTab, setActiveTab] = useState("general");
   const [contentTab, setContentTab] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [adminSearchQuery, setAdminSearchQuery] = useState("");
+  const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [libraries, setLibraries] = useState([]);
   const [unmatched, setUnmatched] = useState([]);
   const [mediaItems, setMediaItems] = useState([]);
@@ -267,20 +268,52 @@ export default function Admin() {
     }
   }
 
-  const matchesSearch = (text) => {
-    if (!searchQuery) return true;
-    return text?.toLowerCase().includes(searchQuery.toLowerCase());
+  const adminSearchItems = [
+    {
+      tab: "general",
+      title: "General settings",
+      description: "TMDB API, metadata connection, player features, skip intro, auto-play next",
+      icon: Settings
+    },
+    {
+      tab: "libraries",
+      title: "Libraries",
+      description: "Add folders, browse paths, scan movie and TV libraries",
+      icon: Library
+    },
+    {
+      tab: "content",
+      title: "Content management",
+      description: "Scanned media, unmatched items, TMDB matching, metadata edits",
+      icon: LayoutGrid
+    }
+  ];
+
+  const filteredAdminSearchItems = adminSearchItems.filter((item) => {
+    const query = adminSearchQuery.trim().toLowerCase();
+    if (!query) return false;
+    return `${item.title} ${item.description}`.toLowerCase().includes(query);
+  });
+
+  function openAdminSearchItem(tab) {
+    setActiveTab(tab);
+    setAdminSearchQuery("");
+  }
+
+  const matchesContentSearch = (text) => {
+    if (!contentSearchQuery) return true;
+    return text?.toLowerCase().includes(contentSearchQuery.toLowerCase());
   };
 
-  const filteredMedia = mediaItems.filter(item => 
-    matchesSearch(item.title) || 
-    matchesSearch(item.file_name) || 
-    matchesSearch(item.year?.toString())
+  const filteredMedia = mediaItems.filter(item =>
+    matchesContentSearch(item.title) ||
+    matchesContentSearch(item.file_name) ||
+    matchesContentSearch(item.year?.toString())
   );
 
-  const filteredUnmatched = unmatched.filter(item => 
-    matchesSearch(item.title) || 
-    matchesSearch(item.file_name)
+  const filteredUnmatched = unmatched.filter(item =>
+    matchesContentSearch(item.title) ||
+    matchesContentSearch(item.file_name)
   );
 
   const canDisconnectTmdb = Boolean(
@@ -519,6 +552,7 @@ export default function Admin() {
 
   function renderContentSettings() {
     const activeItems = contentTab === "all" ? filteredMedia : filteredUnmatched;
+    const searchPlaceholder = contentTab === "all" ? "Search scanned media..." : "Search pending metadata...";
 
     return (
       <div className="admin-content">
@@ -550,16 +584,26 @@ export default function Admin() {
                 {activeItems.length} {contentTab === "all" ? "items in your library" : "items need matching"}
               </p>
             </div>
-            {contentTab === "needs-review" && (
-              <button
-                className="primary-button compact"
-                type="button"
-                onClick={fixAllMatches}
-                disabled={!unmatched.length || bulkTmdb.running}
-              >
-                <Search size={15} /> {bulkTmdb.running ? "TMDB Running" : "Match All"}
-              </button>
-            )}
+            <div className="content-panel-tools">
+              <label className="metadata-search" aria-label={searchPlaceholder}>
+                <Search size={16} />
+                <input
+                  value={contentSearchQuery}
+                  onChange={(event) => setContentSearchQuery(event.target.value)}
+                  placeholder={searchPlaceholder}
+                />
+              </label>
+              {contentTab === "needs-review" && (
+                <button
+                  className="primary-button compact"
+                  type="button"
+                  onClick={fixAllMatches}
+                  disabled={!unmatched.length || bulkTmdb.running}
+                >
+                  <Search size={15} /> {bulkTmdb.running ? "TMDB Running" : "Match All"}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="admin-list movie-admin-list">
@@ -588,7 +632,7 @@ export default function Admin() {
             ))}
             {!activeItems.length && (
               <p className="muted">
-                {searchQuery ? "No results match your search." : contentTab === "all" ? "Library is empty." : "All good! No items need manual review."}
+                {contentSearchQuery ? "No results match your media search." : contentTab === "all" ? "Library is empty." : "All good! No items need manual review."}
               </p>
             )}
           </div>
@@ -637,10 +681,33 @@ export default function Admin() {
             <Search size={18} />
             <input 
               className="admin-search-input"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search library and settings..."
+              value={adminSearchQuery}
+              onChange={(e) => setAdminSearchQuery(e.target.value)}
+              placeholder="Search admin settings..."
             />
+            {adminSearchQuery.trim() ? (
+              <div className="admin-search-results" role="listbox" aria-label="Admin search results">
+                {filteredAdminSearchItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.tab}
+                      type="button"
+                      role="option"
+                      className="admin-search-result"
+                      onClick={() => openAdminSearchItem(item.tab)}
+                    >
+                      <Icon size={17} />
+                      <span>
+                        <strong>{item.title}</strong>
+                        <small>{item.description}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+                {!filteredAdminSearchItems.length ? <p className="admin-search-empty">No admin settings found.</p> : null}
+              </div>
+            ) : null}
           </div>
         </header>
 
