@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
+  AlertCircle,
   CheckCircle2,
   ChevronLeft,
   ExternalLink,
@@ -10,6 +11,7 @@ import {
   Folder,
   FolderPlus,
   HardDrive,
+  Info,
   KeyRound,
   LayoutGrid,
   Library,
@@ -18,7 +20,8 @@ import {
   Save,
   Search,
   Settings,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
 import { useBulkTmdb } from "../lib/bulkTmdb.jsx";
@@ -30,6 +33,12 @@ const emptyLibraryForm = {
   path: ""
 };
 
+function scanSummary(result) {
+  const removed = Number(result?.removedFiles || 0);
+  const cleanup = removed ? ` Removed ${removed} stale ${removed === 1 ? "record" : "records"}.` : "";
+  return `scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.${cleanup}`;
+}
+
 export default function Admin() {
   const [activeTab, setActiveTab] = useState("general");
   const [contentTab, setContentTab] = useState("all");
@@ -38,20 +47,21 @@ export default function Admin() {
   const [libraries, setLibraries] = useState([]);
   const [unmatched, setUnmatched] = useState([]);
   const [mediaItems, setMediaItems] = useState([]);
-  const [status, setStatus] = useState("");
-  const [tmdbStatus, setTmdbStatus] = useState("");
+  const [adminToast, setAdminToast] = useState(null);
   const [activeTmdbItemId, setActiveTmdbItemId] = useState(null);
   const [settings, setSettings] = useState(null);
   const [tmdbApiKey, setTmdbApiKey] = useState("");
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [editing, setEditing] = useState(null);
   const [libraryForm, setLibraryForm] = useState(emptyLibraryForm);
+  const [librarySaveTask, setLibrarySaveTask] = useState(null);
   const [browser, setBrowser] = useState(null);
   const [imageBrowser, setImageBrowser] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const posterInputRef = useRef(null);
   const backdropInputRef = useRef(null);
   const mounted = useRef(false);
+  const adminToastTimer = useRef(null);
   const backdropPointerStartedOutside = useRef(false);
   const { task: bulkTmdb, startBulkTmdb, scanTask, startScan } = useBulkTmdb();
 
@@ -75,23 +85,33 @@ export default function Admin() {
 
     return () => {
       mounted.current = false;
+      if (adminToastTimer.current) window.clearTimeout(adminToastTimer.current);
     };
   }, []);
+
+  function showAdminToast(message, variant = "success") {
+    if (adminToastTimer.current) window.clearTimeout(adminToastTimer.current);
+    setAdminToast({ message, variant });
+    adminToastTimer.current = window.setTimeout(() => {
+      setAdminToast(null);
+    }, variant === "error" ? 7000 : 5000);
+  }
 
   async function scan(library) {
     try {
       const result = await startScan(library);
       if (!mounted.current || !result) return;
-      setStatus(`Scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.`);
       await load();
     } catch (error) {
       if (!mounted.current) return;
-      setStatus(error.message);
     }
   }
 
   async function saveLibrary(event) {
     event.preventDefault();
+    if (librarySaveTask?.running) return;
+
+    const editingLibrary = Boolean(libraryForm.id);
     const payload = {
       name: libraryForm.name.trim(),
       type: libraryForm.type,
@@ -99,15 +119,24 @@ export default function Admin() {
     };
     const endpoint = libraryForm.id ? `/libraries/${libraryForm.id}` : "/libraries";
     const method = libraryForm.id ? "PATCH" : "POST";
+    setLibrarySaveTask({
+      running: true,
+      message: `${editingLibrary ? "Saving" : "Adding"} ${payload.name || "library"} and scanning media...`
+    });
+
     try {
       const data = await apiFetch(endpoint, { method, body: JSON.stringify(payload) });
-      setStatus(data.scan
-        ? `${libraryForm.id ? "Library updated" : "Library added"} and scanned ${data.scan.scanned} files. Added ${data.scan.added}, updated ${data.scan.updated}.`
-        : libraryForm.id ? "Library updated." : "Library added.");
+      if (!mounted.current) return;
+      showAdminToast(data.scan
+        ? `${editingLibrary ? "Library updated" : "Library added"} and ${scanSummary(data.scan)}`
+        : editingLibrary ? "Library updated." : "Library added.");
       setLibraryForm(emptyLibraryForm);
       await load();
     } catch (error) {
-      setStatus(error.message);
+      if (!mounted.current) return;
+      showAdminToast(error.message, "error");
+    } finally {
+      if (mounted.current) setLibrarySaveTask(null);
     }
   }
 
@@ -129,22 +158,22 @@ export default function Admin() {
   async function deleteLibrary(library) {
     try {
       await apiFetch(`/libraries/${library.id}`, { method: "DELETE" });
-      setStatus("Library removed.");
+      showAdminToast("Library removed.");
       if (libraryForm.id === library.id) setLibraryForm(emptyLibraryForm);
       await load();
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
   async function deleteMediaItem(item) {
     try {
       await apiFetch(`/admin/media/${item.id}`, { method: "DELETE" });
-      setStatus(`Removed "${item.title}".`);
+      showAdminToast(`Removed "${item.title}".`);
       if (editing?.id === item.id) setEditing(null);
       await load();
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -154,7 +183,7 @@ export default function Admin() {
       const data = await apiFetch(`/fs/directories${pathQuery}`);
       setBrowser(data);
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -174,7 +203,7 @@ export default function Admin() {
       const data = await apiFetch(`/fs/images?${params.toString()}`);
       setImageBrowser({ ...data, kind, fieldName });
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -192,10 +221,10 @@ export default function Admin() {
       });
       const input = imageBrowser.fieldName === "backdrop_path" ? backdropInputRef.current : posterInputRef.current;
       if (input) input.value = data.storedPath;
-      setStatus(`${imageBrowser.kind === "backdrop" ? "Backdrop" : "Poster"} image selected: ${data.storedPath}`);
+      showAdminToast(`${imageBrowser.kind === "backdrop" ? "Backdrop" : "Poster"} image selected: ${data.storedPath}`);
       setImageBrowser(null);
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -223,26 +252,26 @@ export default function Admin() {
           imdb_id: form.get("imdb_id")
         })
       });
-      setStatus("Metadata saved.");
+      showAdminToast("Metadata saved.");
       setEditing(null);
       await load();
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
   async function fixMatch(item) {
     try {
       setActiveTmdbItemId(item.id);
-      setStatus(`Searching TMDB for ${item.title}...`);
+      showAdminToast(`Searching TMDB for ${item.title}...`, "info");
       const data = await apiFetch(`/admin/media/${item.id}/fix-match`, {
         method: "POST",
         body: JSON.stringify({ title: item.title, year: item.year })
       });
-      setStatus(`TMDB metadata updated for "${data.media?.title || item.title}".`);
+      showAdminToast(`TMDB metadata updated for "${data.media?.title || item.title}".`);
       await load();
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     } finally {
       setActiveTmdbItemId(null);
     }
@@ -251,11 +280,8 @@ export default function Admin() {
   async function fixAllMatches() {
     if (!unmatched.length || bulkTmdb.running) return;
 
-    const result = await startBulkTmdb(unmatched);
+    await startBulkTmdb(unmatched);
     await load();
-    setStatus(result.missed
-      ? `Updated ${result.updated}. ${result.missed} still need review.`
-      : `Updated ${result.updated} items from TMDB.`);
   }
 
   async function saveTmdbSettings(event) {
@@ -267,9 +293,9 @@ export default function Admin() {
       });
       setSettings(data.settings);
       setTmdbApiKey("");
-      setTmdbStatus(data.test?.message || "TMDB settings saved.");
+      showAdminToast(data.test?.message || "TMDB settings saved.");
     } catch (error) {
-      setTmdbStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -279,9 +305,9 @@ export default function Admin() {
         method: "PATCH",
         body: JSON.stringify({ tmdbApiKey, testOnly: true })
       });
-      setTmdbStatus(data.test?.message || "TMDB connected successfully.");
+      showAdminToast(data.test?.message || "TMDB connected successfully.");
     } catch (error) {
-      setTmdbStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -290,9 +316,9 @@ export default function Admin() {
       const data = await apiFetch("/admin/settings/tmdb", { method: "DELETE" });
       setSettings(data.settings);
       setTmdbApiKey("");
-      setTmdbStatus(data.message || "TMDB API key disconnected.");
+      showAdminToast(data.message || "TMDB API key disconnected.");
     } catch (error) {
-      setTmdbStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -303,8 +329,9 @@ export default function Admin() {
         body: JSON.stringify({ [key]: value })
       });
       setSettings((current) => ({ ...current, ...data.settings }));
+      showAdminToast("Player settings updated.");
     } catch (error) {
-      setStatus(error.message);
+      showAdminToast(error.message, "error");
     }
   }
 
@@ -470,7 +497,6 @@ export default function Admin() {
               Open TMDB API settings <ExternalLink size={15} />
             </a>
           </details>
-          {tmdbStatus ? <p className={tmdbStatus.toLowerCase().includes("success") || tmdbStatus.toLowerCase().includes("connected") ? "status" : "settings-error"}>{tmdbStatus}</p> : null}
         </div>
 
         <div className="panel player-settings-panel">
@@ -506,6 +532,8 @@ export default function Admin() {
   }
 
   function renderLibrarySettings() {
+    const librarySaveRunning = Boolean(librarySaveTask?.running);
+
     return (
       <div className="admin-content">
         <div className="admin-section-title">
@@ -522,6 +550,7 @@ export default function Admin() {
                 value={libraryForm.name}
                 onChange={(event) => setLibraryForm((current) => ({ ...current, name: event.target.value }))}
                 placeholder="Movies"
+                disabled={librarySaveRunning}
                 required
               />
             </label>
@@ -530,6 +559,7 @@ export default function Admin() {
               <select
                 value={libraryForm.type}
                 onChange={(event) => setLibraryForm((current) => ({ ...current, type: event.target.value }))}
+                disabled={librarySaveRunning}
               >
                 <option value="movies">Movies</option>
                 <option value="tv">TV Shows</option>
@@ -542,22 +572,33 @@ export default function Admin() {
                   value={libraryForm.path}
                   onChange={(event) => setLibraryForm((current) => ({ ...current, path: event.target.value }))}
                   placeholder="C:/Media/Movies"
+                  disabled={librarySaveRunning}
                   required
                 />
-                <button className="ghost-button" type="button" onClick={() => openBrowser()}>
+                <button className="ghost-button" type="button" onClick={() => openBrowser()} disabled={librarySaveRunning}>
                   <Folder size={17} /> Browse
                 </button>
               </div>
             </label>
             <div className="library-form-actions">
-              <button className="primary-button" type="submit">
-                {libraryForm.id ? <Save size={17} /> : <FolderPlus size={17} />}
-                {libraryForm.id ? "Save" : "Add"}
+              <button className="primary-button" type="submit" disabled={librarySaveRunning}>
+                {librarySaveRunning
+                  ? <RefreshCw className="spin-icon" size={17} />
+                  : libraryForm.id ? <Save size={17} /> : <FolderPlus size={17} />}
+                {librarySaveRunning ? (libraryForm.id ? "Saving" : "Adding") : libraryForm.id ? "Save" : "Add"}
               </button>
               {libraryForm.id ? (
-                <button className="ghost-button" type="button" onClick={() => setLibraryForm(emptyLibraryForm)}>Cancel</button>
+                <button className="ghost-button" type="button" onClick={() => setLibraryForm(emptyLibraryForm)} disabled={librarySaveRunning}>Cancel</button>
               ) : null}
             </div>
+            {librarySaveRunning ? (
+              <div className="library-save-progress" role="status" aria-live="polite">
+                <span>{librarySaveTask.message}</span>
+                <div className="task-progress task-progress-active" aria-label="Library scan in progress">
+                  <div />
+                </div>
+              </div>
+            ) : null}
           </form>
           {libraries.map((library) => (
             <div className="library-line" key={library.id}>
@@ -584,7 +625,6 @@ export default function Admin() {
             </div>
           ))}
           {!libraries.length ? <p className="muted">No libraries yet. Add your first media folder above.</p> : null}
-          {status ? <p className="status">{status}</p> : null}
         </div>
       </div>
     );
@@ -681,12 +721,13 @@ export default function Admin() {
                 {contentSearchQuery ? "No results match your media search." : contentTab === "all" ? "Library is empty." : "All good! No items need manual review."}
               </p>
             )}
-            {status ? <p className="status" role="status" aria-live="polite">{status}</p> : null}
           </div>
         </div>
       </div>
     );
   }
+
+  const activeTaskToastCount = [bulkTmdb, scanTask].filter((task) => task.running || task.message).length;
 
   return (
     <section className="page-pad admin-page">
@@ -762,6 +803,12 @@ export default function Admin() {
         {activeTab === "libraries" && renderLibrarySettings()}
         {activeTab === "content" && renderContentSettings()}
       </main>
+
+      <AdminStatusToast
+        toast={adminToast}
+        activeTaskToastCount={activeTaskToastCount}
+        onDismiss={() => setAdminToast(null)}
+      />
 
       {editing ? (
         <div
@@ -936,5 +983,31 @@ export default function Admin() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function AdminStatusToast({ toast, activeTaskToastCount, onDismiss }) {
+  if (!toast) return null;
+
+  const Icon = toast.variant === "error" ? AlertCircle : toast.variant === "info" ? Info : CheckCircle2;
+  const title = toast.variant === "error" ? "Admin needs attention" : toast.variant === "info" ? "Admin update" : "Admin saved";
+  const bottom = `${1 + activeTaskToastCount * 7.7}rem`;
+
+  return (
+    <aside
+      className={`task-toast admin-toast admin-toast-${toast.variant}`}
+      role="status"
+      aria-live="polite"
+      style={{ "--toast-bottom": bottom }}
+    >
+      <div className="task-toast-header">
+        <Icon size={17} />
+        <strong>{title}</strong>
+        <button type="button" className="task-toast-close" onClick={onDismiss} aria-label="Dismiss admin notification">
+          <X size={15} />
+        </button>
+      </div>
+      <p>{toast.message}</p>
+    </aside>
   );
 }

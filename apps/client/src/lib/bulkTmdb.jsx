@@ -14,6 +14,12 @@ const idleState = {
   message: ""
 };
 
+function scanSummary(result) {
+  const removed = Number(result?.removedFiles || 0);
+  const cleanup = removed ? ` Removed ${removed} stale ${removed === 1 ? "record" : "records"}.` : "";
+  return `Scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.${cleanup}`;
+}
+
 export function BulkTmdbProvider({ children }) {
   const [task, setTask] = useState(idleState);
   const [scanTask, setScanTask] = useState(idleState);
@@ -107,7 +113,7 @@ export function BulkTmdbProvider({ children }) {
         ...idleState,
         running: false,
         current: library.name,
-        message: `Scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.`
+        message: scanSummary(result)
       });
       clearFinishedScan();
       return result;

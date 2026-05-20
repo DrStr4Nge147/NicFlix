@@ -5,7 +5,7 @@ import mime from "mime-types";
 import ffmpeg from "fluent-ffmpeg";
 import axios from "axios";
 import { db, nowIso, rowToMedia } from "../db/database.js";
-import { scanLibrary } from "../scanner/scanner.js";
+import { findExternalSubtitles, scanLibrary } from "../scanner/scanner.js";
 import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManagedTmdbKey } from "../config/appConfig.js";
 import { backdropsRoot, dataRoot, postersRoot } from "../config/paths.js";
 import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
@@ -210,6 +210,23 @@ function srtToVtt(input) {
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2")}`;
+}
+
+function normalizeWebVtt(input) {
+  const normalized = input
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+  return normalized.trimStart().startsWith("WEBVTT") ? normalized : `WEBVTT\n\n${normalized}`;
+}
+
+function externalSubtitleExtension(track) {
+  return String(track?.extension || path.extname(track?.filePath || "")).toLowerCase();
+}
+
+function shouldConvertExternalSubtitleWithFfmpeg(track) {
+  const extension = externalSubtitleExtension(track);
+  return extension !== ".srt" && extension !== ".vtt" && extension !== ".webvtt";
 }
 
 function listMedia(type, limit = 60) {
@@ -841,38 +858,51 @@ api.get("/stream/:fileId", (req, res) => {
   fs.createReadStream(file.file_path, { start, end }).pipe(res);
 });
 
-api.get("/files/:fileId/tracks", (req, res) => {
+api.get("/files/:fileId/tracks", async (req, res, next) => {
   const file = getPlayableFile(req.params.fileId);
   if (!file) {
     res.status(404).json({ error: "File not found" });
     return;
   }
 
-  const externalSubtitles = parseJsonArray(file.external_subtitles)
-    .filter((track) => track.filePath && fs.existsSync(track.filePath))
-    .map((track, index) => ({
-      index,
-      label: track.label || track.language || `Subtitles ${index + 1}`,
-      language: track.language || "en",
-      kind: "subtitles",
-      src: `/api/subtitles/${file.id}/external/${index}`
-    }));
+  try {
+    const discoveredSubtitles = fs.existsSync(file.file_path)
+      ? await findExternalSubtitles(file.file_path)
+      : parseJsonArray(file.external_subtitles);
+    const serializedSubtitles = JSON.stringify(discoveredSubtitles);
+    if (serializedSubtitles !== (file.external_subtitles || "[]")) {
+      db.prepare("UPDATE files SET external_subtitles = ? WHERE id = ?").run(serializedSubtitles, file.id);
+    }
 
-  const embeddedSubtitles = parseJsonArray(file.subtitle_tracks)
-    .filter((track) => track.index !== undefined)
-    .map((track, index) => ({
-      index: track.index,
-      label: track.label || track.language || `Embedded ${index + 1}`,
-      language: track.language || "en",
-      codec: track.codec,
-      kind: "subtitles",
-      src: `/api/subtitles/${file.id}/embedded/${track.index}`
-    }));
+    const externalSubtitles = discoveredSubtitles
+      .filter((track) => track.filePath && fs.existsSync(track.filePath))
+      .map((track, index) => ({
+        index,
+        label: track.label || track.language || `Subtitles ${index + 1}`,
+        language: track.language || "en",
+        format: track.format || externalSubtitleExtension(track).replace(/^\./, ""),
+        kind: "subtitles",
+        src: `/api/subtitles/${file.id}/external/${index}`
+      }));
 
-  res.json({
-    audioTracks: parseJsonArray(file.audio_tracks),
-    subtitleTracks: [...externalSubtitles, ...embeddedSubtitles]
-  });
+    const embeddedSubtitles = parseJsonArray(file.subtitle_tracks)
+      .filter((track) => track.index !== undefined)
+      .map((track, index) => ({
+        index: track.index,
+        label: track.label || track.language || `Embedded ${index + 1}`,
+        language: track.language || "en",
+        codec: track.codec,
+        kind: "subtitles",
+        src: `/api/subtitles/${file.id}/embedded/${track.index}`
+      }));
+
+    res.json({
+      audioTracks: parseJsonArray(file.audio_tracks),
+      subtitleTracks: [...externalSubtitles, ...embeddedSubtitles]
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 api.get("/files/:fileId/context", (req, res) => {
@@ -985,8 +1015,18 @@ api.get("/subtitles/:fileId/external/:trackIndex", async (req, res, next) => {
       return;
     }
 
+    res.type("text/vtt");
+    if (shouldConvertExternalSubtitleWithFfmpeg(track)) {
+      ffmpeg(track.filePath)
+        .outputOptions(["-f", "webvtt"])
+        .on("error", next)
+        .pipe(res, { end: true });
+      return;
+    }
+
     const subtitle = await fs.promises.readFile(track.filePath, "utf8");
-    res.type("text/vtt").send(srtToVtt(subtitle));
+    const extension = externalSubtitleExtension(track);
+    res.send(extension === ".srt" ? srtToVtt(subtitle) : normalizeWebVtt(subtitle));
   } catch (error) {
     next(error);
   }

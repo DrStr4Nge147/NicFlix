@@ -7,7 +7,19 @@ import { probeFile } from "./ffprobe.js";
 import { fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey } from "../metadata/tmdb.js";
 
 const mediaExtensions = new Set([".mp4", ".mkv", ".mov", ".avi", ".webm"]);
-const subtitleExtensions = new Set([".srt"]);
+const subtitleExtensions = new Set([
+  ".srt",
+  ".vtt",
+  ".webvtt",
+  ".ass",
+  ".ssa",
+  ".sub",
+  ".sbv",
+  ".smi",
+  ".ttml",
+  ".dfxp"
+]);
+const subtitleDirectoryNames = new Set(["subs", "subtitles", "subtitle"]);
 const metadataCache = new Map();
 const seasonMetadataCache = new Map();
 
@@ -25,27 +37,64 @@ async function walk(dir) {
   return files;
 }
 
-async function findExternalSubtitles(filePath) {
+async function directoryHasSingleMediaFile(directory) {
+  const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isFile() && mediaExtensions.has(path.extname(entry.name).toLowerCase())).length === 1;
+}
+
+async function subtitleCandidates(directory) {
+  const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+  const candidates = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => ({ entry, directory, fromSubtitleDirectory: false }));
+
+  const subtitleDirectories = entries.filter((entry) => {
+    return entry.isDirectory() && subtitleDirectoryNames.has(entry.name.toLowerCase());
+  });
+
+  for (const subtitleDirectory of subtitleDirectories) {
+    const nestedDirectory = path.join(directory, subtitleDirectory.name);
+    const nestedEntries = await fs.readdir(nestedDirectory, { withFileTypes: true }).catch(() => []);
+    candidates.push(...nestedEntries
+      .filter((entry) => entry.isFile())
+      .map((entry) => ({ entry, directory: nestedDirectory, fromSubtitleDirectory: true })));
+  }
+
+  return candidates;
+}
+
+function subtitleLanguage(value) {
+  const normalized = String(value || "").trim();
+  return normalized && normalized.length <= 3 ? normalized : null;
+}
+
+export async function findExternalSubtitles(filePath) {
   const directory = path.dirname(filePath);
   const parsed = path.parse(filePath);
   const normalizedBase = parsed.name.toLowerCase();
-  const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+  const hasSingleMediaFile = await directoryHasSingleMediaFile(directory);
 
-  return entries
-    .filter((entry) => entry.isFile() && subtitleExtensions.has(path.extname(entry.name).toLowerCase()))
-    .filter((entry) => {
+  return (await subtitleCandidates(directory))
+    .filter(({ entry }) => subtitleExtensions.has(path.extname(entry.name).toLowerCase()))
+    .filter(({ entry, fromSubtitleDirectory }) => {
       const subtitleBase = path.parse(entry.name).name.toLowerCase();
-      return subtitleBase === normalizedBase || subtitleBase.startsWith(`${normalizedBase}.`);
+      return subtitleBase === normalizedBase
+        || subtitleBase.startsWith(`${normalizedBase}.`)
+        || (fromSubtitleDirectory && hasSingleMediaFile);
     })
-    .map((entry, index) => {
+    .map(({ entry, directory: subtitleDirectory, fromSubtitleDirectory }, index) => {
       const subtitleBase = path.parse(entry.name).name;
+      const extension = path.extname(entry.name).toLowerCase();
       const suffix = subtitleBase.slice(parsed.name.length).replace(/^\./, "");
+      const label = suffix || (fromSubtitleDirectory ? subtitleBase : "Subtitles");
       return {
         index,
         fileName: entry.name,
-        filePath: path.join(directory, entry.name),
-        label: suffix || "Subtitles",
-        language: suffix && suffix.length <= 3 ? suffix : null
+        filePath: path.join(subtitleDirectory, entry.name),
+        extension,
+        format: extension.replace(/^\./, ""),
+        label,
+        language: subtitleLanguage(suffix) || subtitleLanguage(subtitleBase)
       };
     });
 }
@@ -92,6 +141,18 @@ async function enrichSeason(tmdbId, seasonNumber) {
 
 function needsMetadataRefresh(item) {
   return !item.tmdb_id || !item.overview || !item.poster_path || !item.backdrop_path;
+}
+
+function normalizeMediaTitle(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(the|a|an)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 async function refreshMissingMetadata(item, parsed) {
@@ -150,7 +211,7 @@ function findExistingMedia(library, parsed, metadata = null) {
   }
 
   if (parsed.type === "tv") {
-    return db.prepare(`
+    const exactMatch = db.prepare(`
       SELECT * FROM media_items
       WHERE library_id = ? AND type = 'tv' AND (
         lower(title) = lower(?) OR lower(COALESCE(original_title, '')) = lower(?)
@@ -158,6 +219,20 @@ function findExistingMedia(library, parsed, metadata = null) {
       ORDER BY added_at
       LIMIT 1
     `).get(library.id, parsed.title, parsed.title);
+    if (exactMatch) return exactMatch;
+
+    const normalizedParsedTitle = normalizeMediaTitle(parsed.title);
+    if (!normalizedParsedTitle) return null;
+
+    return db.prepare(`
+      SELECT *
+      FROM media_items
+      WHERE library_id = ? AND type = 'tv'
+      ORDER BY added_at
+    `).all(library.id).find((item) => {
+      return normalizeMediaTitle(item.title) === normalizedParsedTitle
+        || normalizeMediaTitle(item.original_title) === normalizedParsedTitle;
+    }) || null;
   }
 
   return db.prepare(`
@@ -292,6 +367,63 @@ async function upsertEpisode(mediaItem, parsed) {
   `).get(mediaItem.id, parsed.seasonNumber, parsed.episodeNumber);
 }
 
+function pruneMissingLibraryFiles(library, scannedPaths) {
+  const knownFiles = db.prepare(`
+    SELECT f.id, f.file_path
+    FROM files f
+    JOIN media_items m ON m.id = f.media_item_id
+    WHERE m.library_id = ?
+  `).all(library.id);
+  const missingFileIds = knownFiles
+    .filter((file) => !scannedPaths.has(file.file_path))
+    .map((file) => file.id);
+
+  return db.transaction((fileIds) => {
+    let removedFiles = 0;
+    let removedEpisodes = 0;
+    let removedSeasons = 0;
+    let removedMediaItems = 0;
+
+    for (const fileId of fileIds) {
+      db.prepare("DELETE FROM watch_progress WHERE file_id = ?").run(fileId);
+      removedFiles += db.prepare("DELETE FROM files WHERE id = ?").run(fileId).changes;
+    }
+
+    removedEpisodes = db.prepare(`
+      DELETE FROM episodes
+      WHERE media_item_id IN (SELECT id FROM media_items WHERE library_id = ?)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM files f
+          WHERE f.episode_id = episodes.id
+        )
+    `).run(library.id).changes;
+
+    removedSeasons = db.prepare(`
+      DELETE FROM seasons
+      WHERE media_item_id IN (SELECT id FROM media_items WHERE library_id = ?)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM episodes e
+          WHERE e.media_item_id = seasons.media_item_id
+            AND e.season_number = seasons.season_number
+        )
+    `).run(library.id).changes;
+
+    removedMediaItems = db.prepare(`
+      DELETE FROM media_items
+      WHERE library_id = ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM files f
+          WHERE f.media_item_id = media_items.id
+        )
+    `).run(library.id).changes;
+
+    return { removedFiles, removedEpisodes, removedSeasons, removedMediaItems };
+  })(missingFileIds);
+}
+
 export async function scanLibrary(libraryId) {
   const library = db.prepare("SELECT * FROM libraries WHERE id = ?").get(libraryId);
   if (!library) throw new Error("Library not found");
@@ -301,6 +433,7 @@ export async function scanLibrary(libraryId) {
   }
 
   const files = await walk(library.path);
+  const scannedPaths = new Set(files);
   let added = 0;
   let updated = 0;
 
@@ -357,7 +490,9 @@ export async function scanLibrary(libraryId) {
     else added += 1;
   }
 
-  return { scanned: files.length, added, updated };
+  const pruned = pruneMissingLibraryFiles(library, scannedPaths);
+
+  return { scanned: files.length, added, updated, ...pruned };
 }
 
 export async function syncConfiguredLibraries() {

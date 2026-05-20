@@ -29,6 +29,7 @@ function unlockOrientation() {
 export default function Watch() {
   const { fileId } = useParams();
   const navigate = useNavigate();
+  const playerRef = useRef(null);
   const videoRef = useRef(null);
   const [tracks, setTracks] = useState({ audioTracks: [], subtitleTracks: [] });
   const [selectedAudio, setSelectedAudio] = useState("");
@@ -79,6 +80,42 @@ export default function Watch() {
     lockLandscape();
     return () => unlockOrientation();
   }, []);
+
+  const syncPlayerViewport = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) return;
+
+    const width = window.innerWidth || document.documentElement.clientWidth;
+    const height = window.innerHeight || document.documentElement.clientHeight;
+    if (width) player.style.setProperty("--watch-viewport-width", `${width}px`);
+    if (height) player.style.setProperty("--watch-viewport-height", `${height}px`);
+  }, []);
+
+  useEffect(() => {
+    let timeoutId;
+
+    function scheduleViewportSync() {
+      syncPlayerViewport();
+      window.requestAnimationFrame(syncPlayerViewport);
+      timeoutId = window.setTimeout(syncPlayerViewport, 120);
+    }
+
+    const orientation = window.screen?.orientation;
+
+    scheduleViewportSync();
+    document.addEventListener("fullscreenchange", scheduleViewportSync);
+    document.addEventListener("webkitfullscreenchange", scheduleViewportSync);
+    window.addEventListener("resize", scheduleViewportSync);
+    orientation?.addEventListener?.("change", scheduleViewportSync);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("fullscreenchange", scheduleViewportSync);
+      document.removeEventListener("webkitfullscreenchange", scheduleViewportSync);
+      window.removeEventListener("resize", scheduleViewportSync);
+      orientation?.removeEventListener?.("change", scheduleViewportSync);
+    };
+  }, [syncPlayerViewport]);
 
   useEffect(() => {
     if (isPlaying) lockLandscape();
@@ -429,13 +466,15 @@ export default function Watch() {
   }
 
   async function toggleFullscreen() {
-    const container = videoRef.current?.closest(".watch-page");
+    const container = playerRef.current;
     if (!container) return;
     if (document.fullscreenElement) {
       document.exitFullscreen?.();
     } else {
+      syncPlayerViewport();
       await container.requestFullscreen?.();
       lockLandscape();
+      syncPlayerViewport();
     }
   }
 
@@ -450,6 +489,7 @@ export default function Watch() {
 
   return (
     <section
+      ref={playerRef}
       className={`watch-page ${controlsVisible || !isPlaying ? "controls-visible" : "controls-hidden"}`}
       onMouseMove={showControls}
       onTouchStart={handleTouchStart}
