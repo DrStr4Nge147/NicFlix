@@ -691,8 +691,8 @@ export default function Admin() {
   return (
     <section className="page-pad admin-page">
       <aside className="admin-nav">
-        <div className="admin-nav-header" style={{ padding: "0 1rem 1.5rem" }}>
-          <h1 style={{ fontSize: "1.5rem", margin: 0 }}>NicFlix Admin</h1>
+        <div className="admin-nav-header">
+          <h1>NicFlix Admin</h1>
         </div>
         <button 
           className={`admin-nav-item ${activeTab === "general" ? "active" : ""}`}
@@ -712,8 +712,8 @@ export default function Admin() {
         >
           <LayoutGrid size={20} /> Content
         </button>
-        <div style={{ marginTop: "auto", padding: "1.5rem 1rem" }}>
-          <div className="settings-pill connected" style={{ width: "100%", justifyContent: "center" }}>
+        <div className="admin-server-status">
+          <div className="settings-pill connected">
             <Activity size={14} /> Server Online
           </div>
         </div>

@@ -12,6 +12,20 @@ function formatTime(seconds = 0) {
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}` : `${minutes}:${secs}`;
 }
 
+function lockLandscape() {
+  const orientation = window.screen?.orientation;
+  if (!orientation?.lock) return Promise.resolve(false);
+
+  return orientation.lock("landscape").then(
+    () => true,
+    () => false
+  );
+}
+
+function unlockOrientation() {
+  window.screen?.orientation?.unlock?.();
+}
+
 export default function Watch() {
   const { fileId } = useParams();
   const navigate = useNavigate();
@@ -60,6 +74,15 @@ export default function Watch() {
     const timer = window.setTimeout(() => setControlsVisible(false), 3000);
     return () => window.clearTimeout(timer);
   }, [controlsVisible, isPlaying]);
+
+  useEffect(() => {
+    lockLandscape();
+    return () => unlockOrientation();
+  }, []);
+
+  useEffect(() => {
+    if (isPlaying) lockLandscape();
+  }, [isPlaying]);
 
   useEffect(() => {
     setNextUp(null);
@@ -405,13 +428,14 @@ export default function Watch() {
     }
   }
 
-  function toggleFullscreen() {
+  async function toggleFullscreen() {
     const container = videoRef.current?.closest(".watch-page");
     if (!container) return;
     if (document.fullscreenElement) {
       document.exitFullscreen?.();
     } else {
-      container.requestFullscreen?.();
+      await container.requestFullscreen?.();
+      lockLandscape();
     }
   }
 
@@ -419,11 +443,16 @@ export default function Watch() {
     setControlsVisible(true);
   }
 
+  function handleTouchStart() {
+    showControls();
+    lockLandscape();
+  }
+
   return (
     <section
       className={`watch-page ${controlsVisible || !isPlaying ? "controls-visible" : "controls-hidden"}`}
       onMouseMove={showControls}
-      onTouchStart={showControls}
+      onTouchStart={handleTouchStart}
       onFocus={showControls}
     >
       <button className="watch-back-button" type="button" onClick={() => navigate(-1)} aria-label="Go back">
@@ -439,7 +468,7 @@ export default function Watch() {
         </div>
       ) : null}
 
-      <video ref={videoRef} src={`/api/stream/${fileId}`} autoPlay playsInline onClick={togglePlayback}>
+      <video ref={videoRef} src={`/api/stream/${fileId}`} autoPlay playsInline onClick={showControls} onDoubleClick={togglePlayback}>
         {tracks.subtitleTracks.map((track, index) => (
           <track
             key={`${track.src}-${index}`}
