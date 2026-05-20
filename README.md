@@ -2,6 +2,14 @@
 
 Local-first media library MVP built with Node.js, Express, SQLite, Vite, and React.
 
+## Preview
+
+Preview images are stored in [assets](assets/).
+
+![NicFlix homepage preview](assets/Homepage.jpg)
+
+![NicFlix admin menu preview](<assets/Admin menu.jpg>)
+
 ## Setup
 
 ### One-click Windows install
