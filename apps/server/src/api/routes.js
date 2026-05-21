@@ -901,7 +901,7 @@ api.get("/home", (_req, res) => {
 
   const movies = listMedia("movie", 30);
   const shows = listMedia("tv", 30);
-  const genreRows = ["Action", "Comedy", "Drama", "Sci-Fi"].map((genre) => ({
+  const genreRows = ["Action", "Animation", "Comedy", "Drama", "Sci-Fi"].map((genre) => ({
     title: genre,
     items: db.prepare(`
       SELECT m.*, f.id AS file_id, f.duration AS file_duration, wp.position, wp.watched
