@@ -277,6 +277,10 @@ h2 {
   padding: 1.25rem 0 1.25rem clamp(1rem, 4vw, 3rem);
 }
 
+.row-carousel {
+  position: relative;
+}
+
 .row-scroller {
   display: grid;
   grid-auto-flow: column;
@@ -284,7 +288,95 @@ h2 {
   gap: .85rem;
   overflow-x: auto;
   padding: .2rem clamp(1rem, 4vw, 3rem) .8rem 0;
-  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.row-carousel::before,
+.row-carousel::after {
+  content: "";
+  position: absolute;
+  top: .2rem;
+  bottom: .8rem;
+  z-index: 2;
+  width: clamp(2.8rem, 7vw, 5.2rem);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .28s ease;
+}
+
+.row-carousel::before {
+  left: 0;
+  background: linear-gradient(90deg, #08090d 0%, rgba(8, 9, 13, .68) 48%, transparent 100%);
+}
+
+.row-carousel::after {
+  right: 0;
+  background: linear-gradient(270deg, #08090d 0%, rgba(8, 9, 13, .68) 48%, transparent 100%);
+}
+
+.row-carousel.has-previous::before,
+.row-carousel.has-next::after {
+  opacity: 1;
+}
+
+.row-arrow {
+  position: absolute;
+  top: calc(50% - .4rem);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 4.8rem;
+  padding: 0;
+  color: #fff;
+  background: rgba(8, 9, 13, .68);
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: .45rem;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .42);
+  backdrop-filter: blur(12px);
+  opacity: 1;
+  transform: translateY(-50%);
+  transition: background .16s ease, border-color .16s ease, opacity .28s ease, transform .2s ease;
+}
+
+.row-arrow:hover,
+.row-arrow:focus-visible {
+  background: rgba(255, 255, 255, .18);
+  border-color: rgba(255, 255, 255, .26);
+  outline: 0;
+  transform: translateY(-50%) scale(1.04);
+}
+
+.row-arrow:disabled {
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) scale(.96);
+}
+
+.row-arrow-left {
+  left: .35rem;
+}
+
+.row-arrow-right {
+  right: clamp(.7rem, 3vw, 2.4rem);
+}
+
+.row-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.row-scroller.is-dragging {
+  cursor: grabbing;
+}
+
+.row-scroller.is-dragging .media-card {
+  pointer-events: none;
 }
 
 .media-card-shell {
@@ -317,6 +409,10 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.poster img {
+  -webkit-user-drag: none;
 }
 
 .poster-fallback {
@@ -1880,6 +1976,19 @@ h2 {
 
   .row-scroller {
     grid-auto-columns: clamp(8.2rem, 44vw, 10.5rem);
+  }
+
+  .row-arrow {
+    width: 2.25rem;
+    height: 4rem;
+  }
+
+  .row-arrow-left {
+    left: .2rem;
+  }
+
+  .row-arrow-right {
+    right: .55rem;
   }
 
   .fact-row span,
