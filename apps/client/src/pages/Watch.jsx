@@ -26,12 +26,20 @@ function unlockOrientation() {
   window.screen?.orientation?.unlock?.();
 }
 
+function subtitleSrc(track, offset) {
+  if (!track?.src || offset <= 0.25) return track?.src || "";
+  const separator = track.src.includes("?") ? "&" : "?";
+  return `${track.src}${separator}start=${encodeURIComponent(offset.toFixed(2))}`;
+}
+
 export default function Watch() {
   const { fileId } = useParams();
   const navigate = useNavigate();
   const playerRef = useRef(null);
   const videoRef = useRef(null);
+  const resumeAfterSourceChangeRef = useRef(null);
   const [tracks, setTracks] = useState({ audioTracks: [], subtitleTracks: [] });
+  const [playbackInfo, setPlaybackInfo] = useState(null);
   const [selectedAudio, setSelectedAudio] = useState("");
   const [selectedSubtitle, setSelectedSubtitle] = useState("off");
   const [openTrackMenu, setOpenTrackMenu] = useState(null);
@@ -45,26 +53,36 @@ export default function Watch() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [streamOffset, setStreamOffset] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [segments, setSegments] = useState([]);
   const [activeSegment, setActiveSegment] = useState(null);
   const [globalSettings, setGlobalSettings] = useState(null);
+  const isTranscodedPlayback = playbackInfo?.directPlay === false || playbackContext?.directPlay === false;
+  const fileDuration = Number(playbackInfo?.duration || playbackContext?.duration || 0) || 0;
+  const hasPlaybackMetadata = Boolean(playbackInfo || playbackContext);
 
   const saveProgress = useCallback((watched = false) => {
     const video = videoRef.current;
-    if (!video || Number.isNaN(video.duration)) return Promise.resolve();
+    const mediaDuration = isTranscodedPlayback
+      ? fileDuration
+      : (Number.isFinite(video?.duration) ? video.duration : 0);
+    if (!video || !mediaDuration) return Promise.resolve();
+
+    const rawPosition = isTranscodedPlayback ? streamOffset + (video.currentTime || 0) : (video.currentTime || 0);
+    const position = Math.min(mediaDuration, Math.max(0, rawPosition));
 
     return apiFetch(`/progress/${fileId}`, {
       method: "POST",
       body: JSON.stringify({
-        position: watched ? video.duration : video.currentTime,
-        duration: video.duration,
+        position: watched ? mediaDuration : position,
+        duration: mediaDuration,
         watched
       })
     }).catch(() => {});
-  }, [fileId]);
+  }, [fileDuration, fileId, isTranscodedPlayback, streamOffset]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -125,15 +143,22 @@ export default function Watch() {
     setNextUp(null);
     setCountdown(null);
     setPlaybackContext(null);
+    setPlaybackInfo(null);
     setEpisodeNav({ previous: null, next: null });
     setSelectedAudio("");
     setSelectedSubtitle("off");
     setOpenTrackMenu(null);
+    setCurrentTime(0);
+    setDuration(0);
+    setStreamOffset(0);
+    resumeAfterSourceChangeRef.current = null;
     let cancelled = false;
     apiFetch(`/files/${fileId}/tracks`)
       .then((data) => {
         if (!cancelled) {
-          setTracks(data);
+          setTracks({ audioTracks: data.audioTracks || [], subtitleTracks: data.subtitleTracks || [] });
+          setPlaybackInfo(data.playback || null);
+          if (data.playback?.duration) setDuration(Number(data.playback.duration) || 0);
           if (data.subtitleTracks?.length > 0) {
             const englishIndex = data.subtitleTracks.findIndex((t) =>
               (t.language || "").toLowerCase().includes("en")
@@ -144,11 +169,17 @@ export default function Watch() {
         }
       })
       .catch(() => {
-        if (!cancelled) setTracks({ audioTracks: [], subtitleTracks: [] });
+        if (!cancelled) {
+          setTracks({ audioTracks: [], subtitleTracks: [] });
+          setPlaybackInfo(null);
+        }
       });
     apiFetch(`/files/${fileId}/context`)
       .then(({ context }) => {
-        if (!cancelled) setPlaybackContext(context);
+        if (!cancelled) {
+          setPlaybackContext(context);
+          if (context?.duration) setDuration(Number(context.duration) || 0);
+        }
       })
       .catch(() => {
         if (!cancelled) setPlaybackContext(null);
@@ -211,16 +242,32 @@ export default function Watch() {
   }, [playbackContext]);
 
   useEffect(() => {
-    let timer;
-    let restored = false;
+    if (!playbackContext) return undefined;
+    let cancelled = false;
     const video = videoRef.current;
-
+    if (fileDuration) setDuration(fileDuration);
     apiFetch(`/progress/${fileId}`).then(({ progress }) => {
-      if (video && progress?.position > 0 && !restored) {
-        video.currentTime = progress.position;
-        restored = true;
+      if (cancelled) return;
+      const restoredPosition = Number(progress?.position || 0);
+      if (video && restoredPosition > 0) {
+        if (isTranscodedPlayback) {
+          resumeAfterSourceChangeRef.current = { time: 0, wasPlaying: true };
+          setStreamOffset(restoredPosition);
+          setCurrentTime(restoredPosition);
+          return;
+        }
+        video.currentTime = restoredPosition;
       }
-    });
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fileDuration, fileId, isTranscodedPlayback, playbackContext]);
+
+  useEffect(() => {
+    let timer;
+    const video = videoRef.current;
 
     function save() {
       saveProgress();
@@ -228,8 +275,12 @@ export default function Watch() {
 
     function syncPlaybackState() {
       if (!video) return;
-      setCurrentTime(video.currentTime || 0);
-      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      const mediaDuration = isTranscodedPlayback
+        ? fileDuration
+        : (fileDuration || (Number.isFinite(video.duration) ? video.duration : 0));
+      const rawPosition = isTranscodedPlayback ? streamOffset + (video.currentTime || 0) : (video.currentTime || 0);
+      setCurrentTime(mediaDuration ? Math.min(rawPosition, mediaDuration) : rawPosition);
+      if (mediaDuration) setDuration(mediaDuration);
       setIsPlaying(!video.paused);
     }
 
@@ -268,7 +319,7 @@ export default function Watch() {
       video?.removeEventListener("ended", handleEnded);
       window.removeEventListener("beforeunload", save);
     };
-  }, [autoPlayNext, episodeNav.next, fileId, saveProgress]);
+  }, [autoPlayNext, episodeNav.next, fileDuration, fileId, isTranscodedPlayback, saveProgress, streamOffset]);
 
   useEffect(() => {
     if (!segments.length) {
@@ -292,9 +343,8 @@ export default function Watch() {
       if (["outro", "credits"].includes(activeSegment.type) && episodeNav.next) {
         playNext();
       } else {
-        // Seek to the end of segment, or end of video if it's an outro
         const isOutro = ["outro", "credits"].includes(activeSegment.type);
-        videoRef.current.currentTime = isOutro ? videoRef.current.duration : activeSegment.end;
+        seekTo(isOutro ? duration : activeSegment.end);
         setActiveSegment(null);
       }
     }
@@ -317,6 +367,37 @@ export default function Watch() {
     const timer = window.setTimeout(() => setCountdown((value) => value - 1), 1000);
     return () => window.clearTimeout(timer);
   }, [countdown, navigate, nextUp]);
+
+  const selectedAudioTrack = selectedAudio !== "" ? tracks.audioTracks[Number(selectedAudio)] : null;
+  const streamParams = new URLSearchParams();
+  if (selectedAudioTrack?.index !== undefined) {
+    streamParams.set("audio", selectedAudioTrack.index);
+  }
+  if (isTranscodedPlayback && streamOffset > 0.25) {
+    streamParams.set("start", streamOffset.toFixed(2));
+  }
+  const streamQuery = streamParams.toString();
+  const streamSrc = `/api/stream/${fileId}${streamQuery ? `?${streamQuery}` : ""}`;
+  const subtitleOffset = isTranscodedPlayback ? streamOffset : 0;
+
+  useEffect(() => {
+    const resume = resumeAfterSourceChangeRef.current;
+    const video = videoRef.current;
+    if (!resume || !video) return undefined;
+
+    function restorePlaybackPosition() {
+      if (Number.isFinite(resume.time) && resume.time > 0) {
+        video.currentTime = resume.time;
+      }
+      if (resume.wasPlaying) {
+        video.play().catch(() => {});
+      }
+      resumeAfterSourceChangeRef.current = null;
+    }
+
+    video.addEventListener("loadedmetadata", restorePlaybackPosition, { once: true });
+    return () => video.removeEventListener("loadedmetadata", restorePlaybackPosition);
+  }, [streamSrc]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -356,11 +437,11 @@ export default function Watch() {
           togglePlayback();
           break;
         case "ArrowLeft":
-          video.currentTime = Math.max(0, video.currentTime - 10);
+          seekTo(currentTime - 10);
           showControls();
           break;
         case "ArrowRight":
-          video.currentTime = Math.min(video.duration, video.currentTime + 10);
+          seekTo(currentTime + 10);
           showControls();
           break;
         case "KeyF":
@@ -376,14 +457,25 @@ export default function Watch() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [playbackContext]);
+  }, [currentTime, duration, playbackContext]);
 
   function changeAudioTrack(value) {
-    setSelectedAudio(value);
-    setOpenTrackMenu(null);
     const video = videoRef.current;
     const audioTracks = video?.audioTracks;
-    if (!audioTracks?.length) return;
+    setSelectedAudio(value);
+    setOpenTrackMenu(null);
+    if (!audioTracks?.length) {
+      if (video && isTranscodedPlayback) {
+        const targetTime = Math.min(duration || Infinity, Math.max(0, currentTime || streamOffset + (video.currentTime || 0)));
+        resumeAfterSourceChangeRef.current = { time: 0, wasPlaying: !video.paused };
+        setStreamOffset(targetTime);
+      } else {
+        resumeAfterSourceChangeRef.current = video
+          ? { time: video.currentTime || 0, wasPlaying: !video.paused }
+          : null;
+      }
+      return;
+    }
 
     Array.from(audioTracks).forEach((track, index) => {
       track.enabled = value === "" ? index === 0 : String(index) === value;
@@ -429,12 +521,24 @@ export default function Watch() {
     }
   }
 
-  function seek(event) {
+  function seekTo(value) {
     const video = videoRef.current;
     if (!video) return;
-    const nextTime = Number(event.target.value);
-    video.currentTime = nextTime;
+    const maxDuration = duration || fileDuration || value;
+    const nextTime = Math.min(maxDuration, Math.max(0, Number(value) || 0));
     setCurrentTime(nextTime);
+
+    if (isTranscodedPlayback) {
+      resumeAfterSourceChangeRef.current = { time: 0, wasPlaying: !video.paused };
+      setStreamOffset(nextTime);
+      return;
+    }
+
+    video.currentTime = nextTime;
+  }
+
+  function seek(event) {
+    seekTo(Number(event.target.value));
   }
 
   function toggleMute() {
@@ -508,17 +612,19 @@ export default function Watch() {
         </div>
       ) : null}
 
-      <video ref={videoRef} src={`/api/stream/${fileId}`} autoPlay playsInline onClick={showControls} onDoubleClick={togglePlayback}>
-        {tracks.subtitleTracks.map((track, index) => (
-          <track
-            key={`${track.src}-${index}`}
-            kind={track.kind || "subtitles"}
-            src={track.src}
-            srcLang={track.language || "en"}
-            label={track.label || `Subtitles ${index + 1}`}
-          />
-        ))}
-      </video>
+      {hasPlaybackMetadata ? (
+        <video ref={videoRef} src={streamSrc} autoPlay playsInline onClick={showControls} onDoubleClick={togglePlayback}>
+          {tracks.subtitleTracks.map((track, index) => (
+            <track
+              key={`${track.src}-${subtitleOffset.toFixed(2)}-${index}`}
+              kind={track.kind || "subtitles"}
+              src={subtitleSrc(track, subtitleOffset)}
+              srcLang={track.language || "en"}
+              label={track.label || `Subtitles ${index + 1}`}
+            />
+          ))}
+        </video>
+      ) : null}
 
       {activeSegment ? (
         <button

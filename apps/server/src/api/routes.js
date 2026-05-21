@@ -106,6 +106,131 @@ function getPlayableFile(fileId) {
   return db.prepare("SELECT * FROM files WHERE id = ?").get(fileId);
 }
 
+function hasMp4Container(file) {
+  const container = String(file?.container || "").toLowerCase();
+  const extension = path.extname(file?.file_path || "").toLowerCase();
+  return extension === ".mp4" || extension === ".m4v" || container.split(",").some((part) => ["mov", "mp4", "m4a", "3gp", "3g2", "mj2"].includes(part));
+}
+
+function hasBrowserAudio(file) {
+  const audioCodec = String(file?.audio_codec || "").toLowerCase();
+  return ["aac", "mp3", "mp4a"].includes(audioCodec);
+}
+
+function canDirectPlay(file) {
+  return hasMp4Container(file)
+    && String(file?.video_codec || "").toLowerCase() === "h264"
+    && hasBrowserAudio(file);
+}
+
+function selectedAudioStreamIndex(file, value) {
+  const tracks = parseJsonArray(file.audio_tracks).filter((track) => track.index !== undefined);
+  if (!tracks.length) return null;
+
+  const requested = String(value || "").trim();
+  if (requested) {
+    const requestedNumber = Number(requested);
+    const byStreamIndex = tracks.find((track) => Number(track.index) === requestedNumber);
+    if (byStreamIndex) return byStreamIndex.index;
+    if (tracks[requestedNumber]) return tracks[requestedNumber].index;
+  }
+
+  return (tracks.find((track) => track.default) || tracks[0]).index;
+}
+
+function positiveSeconds(value) {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+}
+
+function streamOriginalFile(file, req, res) {
+  const stat = fs.statSync(file.file_path);
+  const range = req.headers.range;
+  const contentType = mime.lookup(file.file_path) || "application/octet-stream";
+
+  if (!range) {
+    res.writeHead(200, {
+      "Content-Length": stat.size,
+      "Content-Type": contentType,
+      "Accept-Ranges": "bytes"
+    });
+    fs.createReadStream(file.file_path).pipe(res);
+    return;
+  }
+
+  const [startRaw, endRaw] = range.replace(/bytes=/, "").split("-");
+  const start = Number.parseInt(startRaw, 10);
+  const end = endRaw ? Number.parseInt(endRaw, 10) : stat.size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= stat.size) {
+    res.writeHead(416, {
+      "Content-Range": `bytes */${stat.size}`
+    });
+    res.end();
+    return;
+  }
+
+  const chunkSize = end - start + 1;
+
+  res.writeHead(206, {
+    "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+    "Accept-Ranges": "bytes",
+    "Content-Length": chunkSize,
+    "Content-Type": contentType
+  });
+  fs.createReadStream(file.file_path, { start, end }).pipe(res);
+}
+
+function streamBrowserTranscode(file, req, res, next) {
+  const audioStreamIndex = selectedAudioStreamIndex(file, req.query.audio);
+  const start = positiveSeconds(req.query.start);
+  const canCopyVideo = !start && String(file.video_codec || "").toLowerCase() === "h264";
+  const outputOptions = [
+    "-map", "0:v:0",
+    "-sn",
+    "-dn",
+    "-avoid_negative_ts", "make_zero",
+    "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+    "-f", "mp4"
+  ];
+
+  if (audioStreamIndex !== null) {
+    outputOptions.splice(2, 0, "-map", `0:${audioStreamIndex}`);
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "video/mp4",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff"
+  });
+
+  let finished = false;
+  const command = ffmpeg(file.file_path);
+  if (start) command.inputOptions(["-ss", String(start)]);
+
+  command
+    .videoCodec(canCopyVideo ? "copy" : "libx264")
+    .audioCodec("aac")
+    .audioBitrate("192k")
+    .outputOptions(outputOptions)
+    .on("end", () => {
+      finished = true;
+    })
+    .on("error", (error) => {
+      finished = true;
+      if (!res.headersSent) return next(error);
+      if (!res.destroyed) res.destroy(error);
+    });
+
+  if (!canCopyVideo) {
+    command.outputOptions(["-preset", "veryfast", "-pix_fmt", "yuv420p"]);
+  }
+
+  req.on("close", () => {
+    if (!finished) command.kill("SIGKILL");
+  });
+  command.pipe(res, { end: true });
+}
+
 function parseTime(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
@@ -181,7 +306,12 @@ function getPlaybackContext(fileId) {
       e.title AS episode_title,
       e.season_number,
       e.episode_number,
-      f.file_name
+      f.file_name,
+      f.file_path,
+      f.duration,
+      f.video_codec,
+      f.audio_codec,
+      f.container
     FROM files f
     LEFT JOIN media_items m ON m.id = f.media_item_id
     LEFT JOIN episodes e ON e.id = f.episode_id
@@ -200,7 +330,9 @@ function getPlaybackContext(fileId) {
     tmdbId: row.tmdb_id,
     imdbId: row.imdb_id,
     seasonNumber: row.season_number,
-    episodeNumber: row.episode_number
+    episodeNumber: row.episode_number,
+    duration: Number(row.duration) || null,
+    directPlay: canDirectPlay(row)
   };
 }
 
@@ -218,6 +350,70 @@ function normalizeWebVtt(input) {
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
   return normalized.trimStart().startsWith("WEBVTT") ? normalized : `WEBVTT\n\n${normalized}`;
+}
+
+function parseCueTime(value) {
+  const parts = String(value || "").trim().split(":");
+  if (parts.length < 2 || parts.length > 3) return null;
+  const seconds = Number(parts.pop());
+  const minutes = Number(parts.pop());
+  const hours = parts.length ? Number(parts.pop()) : 0;
+  if (![hours, minutes, seconds].every(Number.isFinite)) return null;
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+function formatCueTime(value) {
+  const totalMilliseconds = Math.max(0, Math.round(value * 1000));
+  const hours = Math.floor(totalMilliseconds / 3600000);
+  const minutes = Math.floor((totalMilliseconds % 3600000) / 60000);
+  const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
+  const milliseconds = totalMilliseconds % 1000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+}
+
+function offsetWebVtt(input, offsetSeconds) {
+  const offset = positiveSeconds(offsetSeconds);
+  const webvtt = normalizeWebVtt(input);
+  if (!offset) return webvtt;
+
+  const lines = webvtt.split("\n");
+  const output = [];
+  let cue = [];
+
+  function flushCue() {
+    if (!cue.length) return;
+    const timingIndex = cue.findIndex((line) => line.includes("-->"));
+    if (timingIndex === -1) {
+      output.push(...cue);
+      cue = [];
+      return;
+    }
+
+    const [startRaw, restRaw] = cue[timingIndex].split("-->");
+    const endMatch = String(restRaw || "").trim().match(/^(\S+)(.*)$/);
+    const start = parseCueTime(startRaw);
+    const end = parseCueTime(endMatch?.[1]);
+    if (start === null || end === null || end <= offset) {
+      cue = [];
+      return;
+    }
+
+    cue[timingIndex] = `${formatCueTime(Math.max(0, start - offset))} --> ${formatCueTime(end - offset)}${endMatch?.[2] || ""}`;
+    output.push(...cue);
+    cue = [];
+  }
+
+  for (const line of lines) {
+    if (line.trim() === "") {
+      flushCue();
+      output.push(line);
+    } else {
+      cue.push(line);
+    }
+  }
+  flushCue();
+
+  return output.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 function externalSubtitleExtension(track) {
@@ -823,39 +1019,19 @@ api.get("/search", (req, res) => {
   res.json({ results });
 });
 
-api.get("/stream/:fileId", (req, res) => {
+api.get("/stream/:fileId", (req, res, next) => {
   const file = getPlayableFile(req.params.fileId);
   if (!file || !fs.existsSync(file.file_path)) {
     res.status(404).json({ error: "File not found" });
     return;
   }
 
-  const stat = fs.statSync(file.file_path);
-  const range = req.headers.range;
-  const contentType = mime.lookup(file.file_path) || "application/octet-stream";
-
-  if (!range) {
-    res.writeHead(200, {
-      "Content-Length": stat.size,
-      "Content-Type": contentType,
-      "Accept-Ranges": "bytes"
-    });
-    fs.createReadStream(file.file_path).pipe(res);
+  if (req.query.original === "1" || canDirectPlay(file)) {
+    streamOriginalFile(file, req, res);
     return;
   }
 
-  const [startRaw, endRaw] = range.replace(/bytes=/, "").split("-");
-  const start = Number.parseInt(startRaw, 10);
-  const end = endRaw ? Number.parseInt(endRaw, 10) : stat.size - 1;
-  const chunkSize = end - start + 1;
-
-  res.writeHead(206, {
-    "Content-Range": `bytes ${start}-${end}/${stat.size}`,
-    "Accept-Ranges": "bytes",
-    "Content-Length": chunkSize,
-    "Content-Type": contentType
-  });
-  fs.createReadStream(file.file_path, { start, end }).pipe(res);
+  streamBrowserTranscode(file, req, res, next);
 });
 
 api.get("/files/:fileId/tracks", async (req, res, next) => {
@@ -898,7 +1074,11 @@ api.get("/files/:fileId/tracks", async (req, res, next) => {
 
     res.json({
       audioTracks: parseJsonArray(file.audio_tracks),
-      subtitleTracks: [...externalSubtitles, ...embeddedSubtitles]
+      subtitleTracks: [...externalSubtitles, ...embeddedSubtitles],
+      playback: {
+        duration: Number(file.duration) || null,
+        directPlay: canDirectPlay(file)
+      }
     });
   } catch (error) {
     next(error);
@@ -1010,6 +1190,7 @@ api.get("/subtitles/:fileId/external/:trackIndex", async (req, res, next) => {
   try {
     const file = getPlayableFile(req.params.fileId);
     const track = parseJsonArray(file?.external_subtitles)[Number(req.params.trackIndex)];
+    const start = positiveSeconds(req.query.start);
     if (!file || !track?.filePath || !fs.existsSync(track.filePath)) {
       res.status(404).json({ error: "Subtitle not found" });
       return;
@@ -1017,16 +1198,18 @@ api.get("/subtitles/:fileId/external/:trackIndex", async (req, res, next) => {
 
     res.type("text/vtt");
     if (shouldConvertExternalSubtitleWithFfmpeg(track)) {
-      ffmpeg(track.filePath)
+      const command = ffmpeg(track.filePath)
         .outputOptions(["-f", "webvtt"])
-        .on("error", next)
-        .pipe(res, { end: true });
+        .on("error", next);
+      if (start) command.inputOptions(["-ss", String(start)]);
+      command.pipe(res, { end: true });
       return;
     }
 
     const subtitle = await fs.promises.readFile(track.filePath, "utf8");
     const extension = externalSubtitleExtension(track);
-    res.send(extension === ".srt" ? srtToVtt(subtitle) : normalizeWebVtt(subtitle));
+    const webvtt = extension === ".srt" ? srtToVtt(subtitle) : normalizeWebVtt(subtitle);
+    res.send(offsetWebVtt(webvtt, start));
   } catch (error) {
     next(error);
   }
@@ -1036,16 +1219,18 @@ api.get("/subtitles/:fileId/embedded/:streamIndex", (req, res, next) => {
   const file = getPlayableFile(req.params.fileId);
   const streamIndex = Number(req.params.streamIndex);
   const track = parseJsonArray(file?.subtitle_tracks).find((item) => item.index === streamIndex);
+  const start = positiveSeconds(req.query.start);
   if (!file || !fs.existsSync(file.file_path) || !track) {
     res.status(404).json({ error: "Subtitle stream not found" });
     return;
   }
 
   res.type("text/vtt");
-  ffmpeg(file.file_path)
+  const command = ffmpeg(file.file_path)
     .outputOptions(["-map", `0:${streamIndex}`, "-f", "webvtt"])
-    .on("error", next)
-    .pipe(res, { end: true });
+    .on("error", next);
+  if (start) command.inputOptions(["-ss", String(start)]);
+  command.pipe(res, { end: true });
 });
 
 api.get("/progress/:fileId", (req, res) => {

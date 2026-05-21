@@ -90,6 +90,6 @@ NicFlix detects TV episodes from common filename patterns such as `Show Name S01
 
 ## Notes
 
-NicFlix streams the original files directly to the browser. MP4/H.264/AAC files are the most reliable for playback. Other containers may scan correctly but may not play in every browser unless the browser supports them.
+NicFlix streams MP4/H.264/AAC files directly to the browser and uses FFmpeg on demand for files with browser-unfriendly containers or audio codecs, such as MKV files with EAC3 audio.
 
 FFmpeg/ffprobe should be available on your system for media probing and subtitle extraction/conversion features.
