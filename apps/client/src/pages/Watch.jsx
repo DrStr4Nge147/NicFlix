@@ -26,6 +26,10 @@ function unlockOrientation() {
   window.screen?.orientation?.unlock?.();
 }
 
+function getFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
 function subtitleSrc(track, offset) {
   if (!track?.src || offset <= 0.25) return track?.src || "";
   const separator = track.src.includes("?") ? "&" : "?";
@@ -116,6 +120,26 @@ export default function Watch() {
     if (height) player.style.setProperty("--watch-viewport-height", `${height}px`);
   }, []);
 
+  const refreshPlayerLayout = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) return;
+
+    syncPlayerViewport();
+    player.classList.add("watch-layout-refresh");
+    void player.offsetHeight;
+
+    const finishRefresh = () => {
+      player.classList.remove("watch-layout-refresh");
+      syncPlayerViewport();
+    };
+
+    window.requestAnimationFrame(() => {
+      void player.offsetHeight;
+      window.requestAnimationFrame(finishRefresh);
+    });
+    window.setTimeout(finishRefresh, 160);
+  }, [syncPlayerViewport]);
+
   useEffect(() => {
     let timeoutId;
 
@@ -125,22 +149,33 @@ export default function Watch() {
       timeoutId = window.setTimeout(syncPlayerViewport, 120);
     }
 
+    function handleFullscreenChange() {
+      scheduleViewportSync();
+      if (!getFullscreenElement()) refreshPlayerLayout();
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") refreshPlayerLayout();
+    }
+
     const orientation = window.screen?.orientation;
 
     scheduleViewportSync();
-    document.addEventListener("fullscreenchange", scheduleViewportSync);
-    document.addEventListener("webkitfullscreenchange", scheduleViewportSync);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("resize", scheduleViewportSync);
     orientation?.addEventListener?.("change", scheduleViewportSync);
 
     return () => {
       window.clearTimeout(timeoutId);
-      document.removeEventListener("fullscreenchange", scheduleViewportSync);
-      document.removeEventListener("webkitfullscreenchange", scheduleViewportSync);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("resize", scheduleViewportSync);
       orientation?.removeEventListener?.("change", scheduleViewportSync);
     };
-  }, [syncPlayerViewport]);
+  }, [refreshPlayerLayout, syncPlayerViewport]);
 
   useEffect(() => {
     if (isPlaying) lockLandscape();
@@ -607,11 +642,15 @@ export default function Watch() {
   async function toggleFullscreen() {
     const container = playerRef.current;
     if (!container) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen?.();
+    if (getFullscreenElement()) {
+      try {
+        await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+      } finally {
+        refreshPlayerLayout();
+      }
     } else {
       syncPlayerViewport();
-      await container.requestFullscreen?.();
+      await (container.requestFullscreen?.() || container.webkitRequestFullscreen?.());
       lockLandscape();
       syncPlayerViewport();
     }
