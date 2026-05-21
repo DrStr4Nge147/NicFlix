@@ -43,6 +43,7 @@
     "directories": {
       "output": "release"
     },
+    "artifactName": "NicFlix-Setup-${version}.${ext}",
     "publish": [
       {
         "provider": "github",

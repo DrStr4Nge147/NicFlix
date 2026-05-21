@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 apps/*/node_modules/
+apps/server/.native/
 
 # Local environment and machine-specific config
 .env
