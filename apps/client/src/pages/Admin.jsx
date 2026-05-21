@@ -277,10 +277,10 @@ export default function Admin() {
     }
   }
 
-  async function fixAllMatches() {
-    if (!unmatched.length || bulkTmdb.running) return;
+  async function fixAllMatches(items) {
+    if (!items.length || bulkTmdb.running) return;
 
-    await startBulkTmdb(unmatched);
+    await startBulkTmdb(items);
     await load();
   }
 
@@ -637,6 +637,7 @@ export default function Admin() {
 
   function renderContentSettings() {
     const activeItems = contentTab === "all" ? filteredMedia : filteredUnmatched;
+    const bulkTmdbItems = contentTab === "all" ? mediaItems : unmatched;
     const searchPlaceholder = contentTab === "all" ? "Search scanned media..." : "Search pending metadata...";
 
     return (
@@ -678,16 +679,14 @@ export default function Admin() {
                   placeholder={searchPlaceholder}
                 />
               </label>
-              {contentTab === "needs-review" && (
-                <button
-                  className="primary-button compact"
-                  type="button"
-                  onClick={fixAllMatches}
-                  disabled={!unmatched.length || bulkTmdb.running}
-                >
-                  <Search size={15} /> {bulkTmdb.running ? "TMDB Running" : "Match All"}
-                </button>
-              )}
+              <button
+                className="primary-button compact"
+                type="button"
+                onClick={() => fixAllMatches(bulkTmdbItems)}
+                disabled={!bulkTmdbItems.length || bulkTmdb.running}
+              >
+                <Search size={15} /> {bulkTmdb.running ? "TMDB Running" : "TMDB Detect All"}
+              </button>
             </div>
           </div>
 
