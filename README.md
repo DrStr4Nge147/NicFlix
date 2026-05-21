@@ -46,7 +46,7 @@ Open Admin in NicFlix to add your media folders, scan them, and connect your TMD
 
 Double click `Build Windows Installer.bat` to create the Electron desktop app and NSIS installer.
 
-The build script installs npm packages, builds the web client, packages the tray app, and writes a versioned installer to `release/`.
+The build script installs npm packages, builds the web client, packages the tray app, bundles FFmpeg/ffprobe, and writes a versioned installer to `release/`.
 
 Use `npm version patch`, `npm version minor`, or `npm version major` to bump the app version. The version hook keeps the root package, workspace packages, lockfile metadata, Electron app version, and NSIS installer filename aligned.
 
@@ -102,4 +102,4 @@ NicFlix detects TV episodes from common filename patterns such as `Show Name S01
 
 NicFlix streams MP4/H.264/AAC files directly to the browser and uses FFmpeg on demand for files with browser-unfriendly containers or audio codecs, such as MKV files with EAC3 audio.
 
-FFmpeg/ffprobe should be available on your system for media probing and subtitle extraction/conversion features.
+The Windows desktop installer includes FFmpeg/ffprobe. Source-code and manual setups install the static FFmpeg packages through npm, and can still use system FFmpeg/ffprobe from PATH as a fallback.

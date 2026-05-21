@@ -21,6 +21,17 @@ function logStartup(message, error) {
 }
 
 function createTrayIcon() {
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, "icon.ico")
+    : path.join(__dirname, "..", "build", "icon.ico");
+
+  if (fs.existsSync(iconPath)) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      return icon.resize({ width: 16, height: 16 });
+    }
+  }
+
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
       <g transform="scale(1.3333333)" fill="none" stroke="#e63b3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -75,6 +86,11 @@ function configureRuntimePaths() {
   process.env.DATA_ROOT = dataRoot;
   process.env.DATABASE_PATH = path.join(dataRoot, "app.db");
   process.env.CONFIG_PATH = path.join(app.getPath("userData"), "config.json");
+
+  if (app.isPackaged) {
+    process.env.FFMPEG_PATH = path.join(process.resourcesPath, "bin", "ffmpeg.exe");
+    process.env.FFPROBE_PATH = path.join(process.resourcesPath, "bin", "ffprobe.exe");
+  }
 }
 
 async function startNicFlixServer() {

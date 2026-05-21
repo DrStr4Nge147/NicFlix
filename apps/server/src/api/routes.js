@@ -2,13 +2,13 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import mime from "mime-types";
-import ffmpeg from "fluent-ffmpeg";
 import axios from "axios";
 import { db, nowIso, rowToMedia } from "../db/database.js";
 import { findExternalSubtitles, scanLibrary } from "../scanner/scanner.js";
 import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManagedTmdbKey } from "../config/appConfig.js";
 import { backdropsRoot, dataRoot, postersRoot, repoRoot } from "../config/paths.js";
 import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
+import { ffmpeg } from "../media/ffmpegTools.js";
 
 export const api = express.Router();
 

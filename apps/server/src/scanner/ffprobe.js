@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { ffprobePath } from "../media/ffmpegTools.js";
 
 function streamLabel(stream, fallback) {
   const language = stream.tags?.language && stream.tags.language !== "und" ? stream.tags.language : null;
@@ -9,7 +10,7 @@ export function probeFile(filePath) {
   return new Promise((resolve) => {
     try {
       execFile(
-        "ffprobe",
+        ffprobePath,
         ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", filePath],
         { windowsHide: true, maxBuffer: 1024 * 1024 * 8 },
         (error, stdout) => {
