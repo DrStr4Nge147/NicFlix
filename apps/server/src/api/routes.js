@@ -197,18 +197,16 @@ function streamBrowserTranscode(file, req, res, next) {
   const audioStreamIndex = selectedAudioStreamIndex(file, req.query.audio);
   const start = positiveSeconds(req.query.start);
   const canCopyVideo = !start && String(file.video_codec || "").toLowerCase() === "h264";
+  const audioMap = audioStreamIndex !== null ? `0:${audioStreamIndex}` : "0:a:0?";
   const outputOptions = [
     "-map", "0:v:0",
+    "-map", audioMap,
     "-sn",
     "-dn",
     "-avoid_negative_ts", "make_zero",
     "-movflags", "frag_keyframe+empty_moov+default_base_moof",
     "-f", "mp4"
   ];
-
-  if (audioStreamIndex !== null) {
-    outputOptions.splice(2, 0, "-map", `0:${audioStreamIndex}`);
-  }
 
   res.writeHead(200, {
     "Content-Type": "video/mp4",
