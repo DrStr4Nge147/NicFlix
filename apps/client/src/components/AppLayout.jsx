@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate, useSearchParams } from "react-router-dom";
-import { Film, Search, Settings } from "lucide-react";
+import { Film, House, Search, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function AppLayout() {
@@ -33,6 +33,7 @@ export default function AppLayout() {
       <header className="topbar">
         <Link className="brand" to="/"><Film size={24} /> NicFlix</Link>
         <nav className="navlinks">
+          <NavLink to="/" end><House size={17} /> Home</NavLink>
           <NavLink to="/movies">Movies</NavLink>
           <NavLink to="/shows">TV Shows</NavLink>
         </nav>
