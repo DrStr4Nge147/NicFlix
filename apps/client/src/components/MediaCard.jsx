@@ -10,6 +10,11 @@ export default function MediaCard({ item, onRemove }) {
   const sublabel = item.resume && item.episode_number
     ? `S${item.season_number}:E${item.episode_number}${item.episode_title ? ` - ${item.episode_title}` : ""}`
     : item.year || item.type;
+  const handleRemoveClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRemove?.();
+  };
 
   return (
     <div className="media-card-shell">
@@ -29,7 +34,14 @@ export default function MediaCard({ item, onRemove }) {
         <ProgressBar position={item.position} duration={item.file_duration || item.duration} />
       </Link>
       {onRemove ? (
-        <button className="card-remove-button" type="button" onClick={onRemove} aria-label={`Remove ${item.title} from Continue Watching`} title="Remove from Continue Watching">
+        <button
+          className="card-remove-button"
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={handleRemoveClick}
+          aria-label={`Remove ${item.title} from Continue Watching`}
+          title="Remove from Continue Watching"
+        >
           <X size={16} />
         </button>
       ) : null}

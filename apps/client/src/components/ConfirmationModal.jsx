@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 export default function ConfirmationModal({ title, message, confirmLabel, onConfirm, onCancel }) {
@@ -15,7 +16,7 @@ export default function ConfirmationModal({ title, message, confirmLabel, onConf
     backdropPointerStartedOutside.current = false;
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onPointerDown={trackBackdropPointerDown} onClick={handleBackdropClick}>
       <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
         <div className="panel-header">
@@ -34,6 +35,7 @@ export default function ConfirmationModal({ title, message, confirmLabel, onConf
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

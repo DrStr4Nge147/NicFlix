@@ -184,6 +184,11 @@ export default function MediaRow({ title, items, onRemoveItem }) {
 
   const handleClickCapture = (event) => {
     if (!dragRef.current.moved) return;
+    if (event.target instanceof Element && event.target.closest("button, input, textarea, select, [role='button']")) {
+      dragRef.current.moved = false;
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     dragRef.current.moved = false;
