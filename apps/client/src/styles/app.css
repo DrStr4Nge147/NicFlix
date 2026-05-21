@@ -46,6 +46,34 @@ button {
   min-height: 100vh;
 }
 
+.page-transition-stage {
+  min-height: calc(100vh - 4.6rem);
+  transition: opacity .16s ease, transform .16s ease;
+  will-change: opacity, transform;
+}
+
+.page-transition-leaving {
+  opacity: 0;
+  transform: translateY(.45rem);
+}
+
+.page-transition-content {
+  min-height: inherit;
+  animation: page-transition-in .28s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+@keyframes page-transition-in {
+  from {
+    opacity: 0;
+    transform: translateY(.55rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -1645,6 +1673,15 @@ h2 {
 
   100% {
     transform: translateX(240%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition-stage,
+  .page-transition-content {
+    animation: none;
+    transition: none;
+    will-change: auto;
   }
 }
 
