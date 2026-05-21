@@ -32,6 +32,12 @@ function subtitleSrc(track, offset) {
   return `${track.src}${separator}start=${encodeURIComponent(offset.toFixed(2))}`;
 }
 
+function cueTextLines(cue) {
+  const fragment = typeof cue?.getCueAsHTML === "function" ? cue.getCueAsHTML() : null;
+  const text = fragment?.textContent || cue?.text || "";
+  return String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+}
+
 export default function Watch() {
   const { fileId } = useParams();
   const navigate = useNavigate();
@@ -42,6 +48,7 @@ export default function Watch() {
   const [playbackInfo, setPlaybackInfo] = useState(null);
   const [selectedAudio, setSelectedAudio] = useState("");
   const [selectedSubtitle, setSelectedSubtitle] = useState("off");
+  const [activeSubtitles, setActiveSubtitles] = useState([]);
   const [openTrackMenu, setOpenTrackMenu] = useState(null);
   const [playbackContext, setPlaybackContext] = useState(null);
   const [openSeasons, setOpenSeasons] = useState({});
@@ -403,13 +410,40 @@ export default function Watch() {
     const video = videoRef.current;
     if (!video) return undefined;
 
-    const timer = window.setTimeout(() => {
-      Array.from(video.textTracks || []).forEach((track, index) => {
-        track.mode = String(index) === selectedSubtitle ? "showing" : "disabled";
-      });
-    }, 250);
+    let selectedTrack = null;
 
-    return () => window.clearTimeout(timer);
+    function syncActiveSubtitles() {
+      if (!selectedTrack) {
+        setActiveSubtitles([]);
+        return;
+      }
+
+      const cues = Array.from(selectedTrack.activeCues || []);
+      setActiveSubtitles(cues.map((cue, index) => ({
+        key: cue.id || `${cue.startTime}-${cue.endTime}-${index}`,
+        lines: cueTextLines(cue)
+      })));
+    }
+
+    function applyTrackMode() {
+      selectedTrack = null;
+      Array.from(video.textTracks || []).forEach((track, index) => {
+        const isSelected = selectedSubtitle !== "off" && String(index) === selectedSubtitle;
+        track.mode = isSelected ? "hidden" : "disabled";
+        if (isSelected) selectedTrack = track;
+      });
+      syncActiveSubtitles();
+      selectedTrack?.addEventListener?.("cuechange", syncActiveSubtitles);
+    }
+
+    const timer = window.setTimeout(applyTrackMode, 250);
+    video.addEventListener("timeupdate", syncActiveSubtitles);
+
+    return () => {
+      window.clearTimeout(timer);
+      video.removeEventListener("timeupdate", syncActiveSubtitles);
+      selectedTrack?.removeEventListener?.("cuechange", syncActiveSubtitles);
+    };
   }, [selectedSubtitle, tracks.subtitleTracks]);
 
   useEffect(() => {
@@ -485,9 +519,10 @@ export default function Watch() {
   function changeSubtitleTrack(value) {
     setSelectedSubtitle(value);
     setOpenTrackMenu(null);
+    if (value === "off") setActiveSubtitles([]);
     const video = videoRef.current;
     Array.from(video?.textTracks || []).forEach((track, index) => {
-      track.mode = String(index) === value ? "showing" : "disabled";
+      track.mode = String(index) === value ? "hidden" : "disabled";
     });
   }
 
@@ -624,6 +659,20 @@ export default function Watch() {
             />
           ))}
         </video>
+      ) : null}
+
+      {activeSubtitles.length ? (
+        <div className="watch-subtitle-overlay" aria-hidden="true">
+          {activeSubtitles.map((cue) => (
+            <div className="watch-subtitle-cue" key={cue.key}>
+              {cue.lines.map((line, lineIndex) => (
+                line
+                  ? <span className="watch-subtitle-line" key={`${cue.key}-${lineIndex}`}>{line}</span>
+                  : <br key={`${cue.key}-${lineIndex}`} />
+              ))}
+            </div>
+          ))}
+        </div>
       ) : null}
 
       {activeSegment ? (

@@ -728,6 +728,46 @@ h2 {
   background: #000;
 }
 
+.watch-subtitle-overlay {
+  position: absolute;
+  left: max(1rem, 8vw);
+  right: max(1rem, 8vw);
+  bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+  z-index: 11;
+  display: grid;
+  justify-items: center;
+  gap: .25rem;
+  pointer-events: none;
+  transition: bottom .2s ease;
+}
+
+.watch-page.controls-hidden .watch-subtitle-overlay {
+  bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
+}
+
+.watch-subtitle-cue {
+  display: grid;
+  justify-items: center;
+  gap: .08rem;
+  max-width: min(76rem, 100%);
+}
+
+.watch-subtitle-line {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: .12em .38em .18em;
+  color: #fff;
+  background: rgba(0, 0, 0, .68);
+  border-radius: .18rem;
+  font-size: clamp(1.15rem, 2.8vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: 0 2px 5px rgba(0, 0, 0, .9);
+  overflow-wrap: anywhere;
+}
+
 .watch-back-button {
   position: absolute;
   top: 1rem;
