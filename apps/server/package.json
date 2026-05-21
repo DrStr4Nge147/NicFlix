@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/ensure-server-native.cjs",
+    "prestart": "node ../../scripts/ensure-server-native.cjs",
     "dev": "node src/index.js",
     "start": "node src/index.js"
   },
