@@ -7,6 +7,7 @@ const MAX_GLIDE_DISTANCE = 900;
 const MIN_GLIDE_VELOCITY = 0.08;
 const MOMENTUM_MULTIPLIER = 720;
 const SCROLL_EDGE_TOLERANCE = 2;
+const DRAG_THRESHOLD = 7;
 
 function clampScroll(scroller, value) {
   const maxScroll = scroller.scrollWidth - scroller.clientWidth;
@@ -19,6 +20,7 @@ export default function MediaRow({ title, items, onRemoveItem }) {
   const dragRef = useRef({
     active: false,
     moved: false,
+    pointerId: null,
     startX: 0,
     lastX: 0,
     lastTime: 0,
@@ -147,15 +149,13 @@ export default function MediaRow({ title, items, onRemoveItem }) {
     dragRef.current = {
       active: true,
       moved: false,
+      pointerId: event.pointerId,
       startX: event.clientX,
       lastX: event.clientX,
       lastTime: event.timeStamp,
       scrollLeft: scroller.scrollLeft,
       velocity: 0
     };
-
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    setIsDragging(true);
   };
 
   const handlePointerMove = (event) => {
@@ -166,9 +166,13 @@ export default function MediaRow({ title, items, onRemoveItem }) {
     const elapsed = Math.max(1, event.timeStamp - drag.lastTime);
     const instantVelocity = -(event.clientX - drag.lastX) / elapsed;
 
-    if (Math.abs(distance) > 5) {
+    if (!drag.moved && Math.abs(distance) > DRAG_THRESHOLD) {
       drag.moved = true;
+      event.currentTarget.setPointerCapture?.(drag.pointerId);
+      setIsDragging(true);
     }
+
+    if (!drag.moved) return;
 
     drag.velocity = drag.velocity * 0.72 + instantVelocity * 0.28;
     drag.lastX = event.clientX;
@@ -209,6 +213,7 @@ export default function MediaRow({ title, items, onRemoveItem }) {
           onPointerUp={stopDragging}
           onPointerCancel={stopDragging}
           onLostPointerCapture={stopDragging}
+          onDragStart={(event) => event.preventDefault()}
         >
           {items.map((item) => (
             <MediaCard

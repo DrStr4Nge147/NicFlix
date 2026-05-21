@@ -13,9 +13,9 @@ export default function MediaCard({ item, onRemove }) {
 
   return (
     <div className="media-card-shell">
-      <Link className="media-card" to={to}>
+      <Link className="media-card" to={to} draggable={false}>
         <div className="poster">
-          {posterUrl(item) ? <img src={posterUrl(item)} alt="" loading="lazy" /> : <div className="poster-fallback">{item.title}</div>}
+          {posterUrl(item) ? <img src={posterUrl(item)} alt="" loading="lazy" draggable={false} /> : <div className="poster-fallback">{item.title}</div>}
           {item.file_id ? (
             <span className="play-badge" aria-label="Playable">
               <Play size={15} fill="currentColor" />
