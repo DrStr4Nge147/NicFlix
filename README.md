@@ -52,6 +52,8 @@ Use `npm version patch`, `npm version minor`, or `npm version major` to bump the
 
 After installing, NicFlix runs in the Windows system tray and automatically opens your default browser to the local NicFlix app. The tray menu can open NicFlix, enable or disable start-with-Windows, or quit the background server.
 
+Installed desktop builds check GitHub Releases for updates after startup and can also be checked from the tray menu with **Check for Updates**. To publish an update, bump the version, build the installer, then upload the generated `.exe`, `.exe.blockmap`, and `latest.yml` files from `release/` to a GitHub release for the same version.
+
 ### Manual setup
 
 1. Copy `apps/server/.env.example` to `apps/server/.env`.
