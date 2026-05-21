@@ -10,6 +10,8 @@ config.json
 
 # Build output and caches
 dist/
+build/
+release/
 apps/*/dist/
 .vite/
 apps/*/.vite/

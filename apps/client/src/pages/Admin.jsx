@@ -440,7 +440,7 @@ export default function Admin() {
                   ? "Disconnected. NicFlix will not use TMDB until you connect a key again."
                   : settings?.tmdbConfigured
                   ? `Connected from ${settings.tmdbApiKeySource === "env" ? "server environment" : "app settings"} (${settings.tmdbApiKeyMasked}).`
-                  : "Not connected yet. Matching still works best after adding your free TMDB developer API key."}
+                  : "Not connected yet. Add the short TMDB API Key from your TMDB account settings to enable metadata matching."}
               </p>
             </div>
             <div className="tmdb-header-actions">
@@ -457,13 +457,13 @@ export default function Admin() {
           </div>
           <form className="tmdb-settings-form" onSubmit={saveTmdbSettings}>
             <label>
-              TMDB API Key
+              TMDB v3 API Key
               <div className="secret-input">
                 <input
                   type={showTmdbKey ? "text" : "password"}
                   value={tmdbApiKey}
                   onChange={(event) => setTmdbApiKey(event.target.value)}
-                  placeholder={settings?.tmdbConfigured ? "Paste a new key to replace the saved one" : "Paste your v3 API Key here"}
+                  placeholder={settings?.tmdbConfigured ? "Paste a new v3 API Key to replace the saved one" : "Paste the short API Key from TMDB settings"}
                   autoComplete="off"
                 />
                 <button
@@ -475,6 +475,9 @@ export default function Admin() {
                   {showTmdbKey ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
+              <span className="field-help">
+                Use the shorter field named "API Key" on TMDB. Do not paste the long "API Read Access Token".
+              </span>
             </label>
             <div className="tmdb-button-row">
               <button className="ghost-button" type="button" onClick={testTmdbSettings} disabled={!tmdbApiKey.trim()}>
@@ -486,15 +489,17 @@ export default function Admin() {
             </div>
           </form>
           <details className="setup-guide" open={!settings?.tmdbConfigured}>
-            <summary>First time? Get a free TMDB key without being a developer</summary>
+            <summary>First time? Get the right TMDB key</summary>
             <ol>
-              <li>Create or sign in to a free TMDB account, then use a desktop browser for the API page.</li>
-              <li>Open your account settings and choose API. Accept the terms when asked.</li>
-              <li>When it asks about your use, choose Developer. For app details, use NicFlix as the app name and personal home media metadata as the purpose.</li>
-              <li>Copy the v3 API Key, not the long API Read Access Token, then paste it above and press Test.</li>
+              <li>Create or sign in to a free TMDB account.</li>
+              <li>Open the TMDB API settings page. The correct page is www.themoviedb.org/settings/api.</li>
+              <li>If TMDB asks what type of access you need, choose Developer. You do not need to be a software developer; this is just TMDB's name for a personal API key.</li>
+              <li>For the app details, use NicFlix as the app name and personal home media metadata as the purpose.</li>
+              <li>On the API page, copy the shorter value under "API Key". Do not copy the long "API Read Access Token" above it.</li>
+              <li>Paste the API Key above, press Test, then Save API Key.</li>
             </ol>
             <a className="guide-link" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">
-              Open TMDB API settings <ExternalLink size={15} />
+              Open the correct TMDB API settings page <ExternalLink size={15} />
             </a>
           </details>
         </div>
@@ -756,6 +761,9 @@ export default function Admin() {
         <div className="admin-server-status">
           <div className="settings-pill connected">
             <Activity size={14} /> Server Online
+          </div>
+          <div className="admin-version">
+            Build {settings?.buildVersion || settings?.appVersion || "0.0.0"}
           </div>
         </div>
       </aside>

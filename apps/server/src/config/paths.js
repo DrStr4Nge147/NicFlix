@@ -16,7 +16,7 @@ export function resolveFromServer(value, fallback) {
 
 export const databasePath = resolveFromServer(process.env.DATABASE_PATH, "../../data/app.db");
 export const configPath = resolveFromServer(process.env.CONFIG_PATH, "../../config.json");
-export const dataRoot = path.resolve(repoRoot, "data");
+export const dataRoot = path.resolve(process.env.DATA_ROOT || path.join(repoRoot, "data"));
 export const postersRoot = path.join(dataRoot, "posters");
 export const backdropsRoot = path.join(dataRoot, "backdrops");
 
@@ -25,4 +25,3 @@ export function ensureDataDirs() {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
-

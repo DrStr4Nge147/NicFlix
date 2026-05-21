@@ -1,5 +1,7 @@
 {
   "libraries": [],
   "tmdbApiKeyEncrypted": "",
-  "tmdbDisconnected": false
+  "tmdbDisconnected": false,
+  "autoSkipEnabled": false,
+  "autoPlayNextEnabled": true
 }

@@ -1228,6 +1228,13 @@ h2 {
   padding: 0 .7rem;
 }
 
+.field-help {
+  color: #aeb7c8;
+  font-size: .88rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
 .tmdb-button-row {
   display: flex;
   gap: .5rem;
@@ -1951,6 +1958,14 @@ h2 {
   justify-content: center;
 }
 
+.admin-version {
+  margin-top: .6rem;
+  color: #9ea6b8;
+  font-size: .82rem;
+  font-weight: 750;
+  text-align: center;
+}
+
 .admin-nav-item {
   display: flex;
   align-items: center;
@@ -2209,7 +2224,21 @@ h2 {
   }
 
   .admin-server-status {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    margin-top: 0;
+    padding: 0;
+  }
+
+  .admin-server-status .settings-pill {
     display: none;
+  }
+
+  .admin-version {
+    margin-top: 0;
+    padding: .85rem .75rem;
+    white-space: nowrap;
   }
   
   .admin-header {

@@ -42,6 +42,16 @@ Then double click `Start NicFlix.bat`.
 
 Open Admin in NicFlix to add your media folders, scan them, and connect your TMDB API key for metadata lookup.
 
+### Windows desktop installer
+
+Double click `Build Windows Installer.bat` to create the Electron desktop app and NSIS installer.
+
+The build script installs npm packages, builds the web client, packages the tray app, and writes a versioned installer to `release/`.
+
+Use `npm version patch`, `npm version minor`, or `npm version major` to bump the app version. The version hook keeps the root package, workspace packages, lockfile metadata, Electron app version, and NSIS installer filename aligned.
+
+After installing, NicFlix runs in the Windows system tray and automatically opens your default browser to the local NicFlix app. The tray menu can open NicFlix, enable or disable start-with-Windows, or quit the background server.
+
 ### Manual setup
 
 1. Copy `apps/server/.env.example` to `apps/server/.env`.
@@ -76,7 +86,7 @@ Admin is where you manage the server after install:
 
 ## TMDB metadata
 
-NicFlix can store and test your TMDB API key from Admin. Open Admin, go to **General**, paste your free TMDB v3 API key, and choose **Test** or **Save API Key**.
+NicFlix can store and test your TMDB API key from Admin. Open Admin, go to **General**, then open `https://www.themoviedb.org/settings/api` in your browser. Copy the shorter value named **API Key** and paste it into NicFlix. Do not use the long **API Read Access Token**. Choose **Test**, then **Save API Key**.
 
 Saved app-managed keys are encrypted in `config.json` using a local secret in `data/app.secret`. For server-managed deployments, you can still set `TMDB_API_KEY` in `apps/server/.env`. Admin will show whether the active key is coming from app settings or the server environment.
 

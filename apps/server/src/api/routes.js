@@ -7,10 +7,23 @@ import axios from "axios";
 import { db, nowIso, rowToMedia } from "../db/database.js";
 import { findExternalSubtitles, scanLibrary } from "../scanner/scanner.js";
 import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManagedTmdbKey } from "../config/appConfig.js";
-import { backdropsRoot, dataRoot, postersRoot } from "../config/paths.js";
+import { backdropsRoot, dataRoot, postersRoot, repoRoot } from "../config/paths.js";
 import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
 
 export const api = express.Router();
+
+let cachedBuildVersion = null;
+
+function getBuildVersion() {
+  if (cachedBuildVersion) return cachedBuildVersion;
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+    cachedBuildVersion = packageJson.version || "0.0.0";
+  } catch {
+    cachedBuildVersion = "0.0.0";
+  }
+  return cachedBuildVersion;
+}
 
 function publicAssetUrl(value) {
   if (!value) return null;
@@ -558,6 +571,8 @@ api.get("/admin/settings", (_req, res) => {
   const appManaged = hasAppManagedTmdbKey();
   res.json({
     settings: {
+      buildVersion: getBuildVersion(),
+      appVersion: getBuildVersion(),
       tmdbConfigured: hasTmdbKey(),
       tmdbApiKeyMasked: maskSecret(apiKey),
       tmdbApiKeySource: config.tmdbDisconnected ? "none" : (appManaged ? "app" : (process.env.TMDB_API_KEY ? "env" : "none")),
@@ -597,6 +612,8 @@ api.patch("/admin/settings/tmdb", async (req, res, next) => {
       writeAppConfig({ tmdbApiKey: "", tmdbDisconnected: true });
       res.json({
         settings: {
+          buildVersion: getBuildVersion(),
+          appVersion: getBuildVersion(),
           tmdbConfigured: hasTmdbKey(),
           tmdbApiKeyMasked: maskSecret(getTmdbApiKey()),
           tmdbApiKeySource: "none",
@@ -617,6 +634,8 @@ api.patch("/admin/settings/tmdb", async (req, res, next) => {
     writeAppConfig({ tmdbApiKey, tmdbDisconnected: false });
     res.json({
       settings: {
+        buildVersion: getBuildVersion(),
+        appVersion: getBuildVersion(),
         tmdbConfigured: hasTmdbKey(),
         tmdbApiKeyMasked: maskSecret(tmdbApiKey),
         tmdbApiKeySource: "app",
@@ -634,6 +653,8 @@ api.delete("/admin/settings/tmdb", (_req, res) => {
   writeAppConfig({ tmdbApiKey: "", tmdbDisconnected: true });
   res.json({
     settings: {
+      buildVersion: getBuildVersion(),
+      appVersion: getBuildVersion(),
       tmdbConfigured: false,
       tmdbApiKeyMasked: "",
       tmdbApiKeySource: "none",
