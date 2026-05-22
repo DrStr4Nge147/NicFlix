@@ -42,6 +42,56 @@ function cueTextLines(cue) {
   return String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 }
 
+const PLAYER_VOLUME_KEY = "nicflix.playerVolume";
+const PLAYER_MUTED_KEY = "nicflix.playerMuted";
+
+function clampVolume(value) {
+  const volume = Number(value);
+  if (!Number.isFinite(volume)) return 1;
+  return Math.min(1, Math.max(0, volume));
+}
+
+function getStoredVolume() {
+  try {
+    const storedVolume = localStorage.getItem(PLAYER_VOLUME_KEY);
+    return storedVolume === null ? 1 : clampVolume(storedVolume);
+  } catch {
+    return 1;
+  }
+}
+
+function getStoredMuted() {
+  try {
+    return localStorage.getItem(PLAYER_MUTED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveStoredPlayerVolume(nextVolume, nextMuted) {
+  try {
+    localStorage.setItem(PLAYER_VOLUME_KEY, String(clampVolume(nextVolume)));
+    localStorage.setItem(PLAYER_MUTED_KEY, String(Boolean(nextMuted)));
+  } catch {
+    // Ignore unavailable storage; the in-memory video state still updates.
+  }
+}
+
+function applyPlayerVolume(video, nextVolume, nextMuted) {
+  if (!video) return;
+  const clampedVolume = clampVolume(nextVolume);
+  video.volume = clampedVolume;
+  video.muted = nextMuted || clampedVolume === 0;
+}
+
+function reliableDuration(video, fallbackDuration) {
+  const videoDuration = Number(video?.duration);
+  if (Number.isFinite(videoDuration) && videoDuration > 0) return videoDuration;
+
+  const fileDuration = Number(fallbackDuration);
+  return Number.isFinite(fileDuration) && fileDuration > 0 ? fileDuration : 0;
+}
+
 export default function Watch() {
   const { fileId } = useParams();
   const navigate = useNavigate();
@@ -65,8 +115,8 @@ export default function Watch() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [streamOffset, setStreamOffset] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(getStoredVolume);
+  const [muted, setMuted] = useState(getStoredMuted);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [segments, setSegments] = useState([]);
   const [activeSegment, setActiveSegment] = useState(null);
@@ -75,18 +125,25 @@ export default function Watch() {
   const fileDuration = Number(playbackInfo?.duration || playbackContext?.duration || 0) || 0;
   const hasPlaybackMetadata = Boolean(playbackInfo || playbackContext);
 
-  const saveProgress = useCallback((watched = false) => {
+  const bindVideoRef = useCallback((video) => {
+    videoRef.current = video;
+    applyPlayerVolume(video, volume, muted);
+  }, [muted, volume]);
+
+  const saveProgress = useCallback((watched = false, options = {}) => {
     const video = videoRef.current;
     const mediaDuration = isTranscodedPlayback
       ? fileDuration
-      : (Number.isFinite(video?.duration) ? video.duration : 0);
+      : reliableDuration(video, fileDuration);
     if (!video || !mediaDuration) return Promise.resolve();
 
     const rawPosition = isTranscodedPlayback ? streamOffset + (video.currentTime || 0) : (video.currentTime || 0);
     const position = Math.min(mediaDuration, Math.max(0, rawPosition));
+    if (!watched && position <= 0.5) return Promise.resolve();
 
     return apiFetch(`/progress/${fileId}`, {
       method: "POST",
+      keepalive: options.keepalive === true,
       body: JSON.stringify({
         position: watched ? mediaDuration : position,
         duration: mediaDuration,
@@ -308,11 +365,19 @@ export default function Watch() {
   }, [fileDuration, fileId, isTranscodedPlayback, playbackContext]);
 
   useEffect(() => {
+    applyPlayerVolume(videoRef.current, volume, muted);
+  }, [hasPlaybackMetadata, muted, volume]);
+
+  useEffect(() => {
     let timer;
     const video = videoRef.current;
 
     function save() {
       saveProgress();
+    }
+
+    function saveForUnload() {
+      saveProgress(false, { keepalive: true });
     }
 
     function syncPlaybackState() {
@@ -328,8 +393,11 @@ export default function Watch() {
 
     function syncVolumeState() {
       if (!video) return;
-      setVolume(video.volume);
-      setMuted(video.muted);
+      const nextVolume = clampVolume(video.volume);
+      const nextMuted = video.muted;
+      setVolume(nextVolume);
+      setMuted(nextMuted);
+      saveStoredPlayerVolume(nextVolume, nextMuted);
     }
 
     function handleEnded() {
@@ -347,7 +415,8 @@ export default function Watch() {
     video?.addEventListener("volumechange", syncVolumeState);
     video?.addEventListener("pause", save);
     video?.addEventListener("ended", handleEnded);
-    window.addEventListener("beforeunload", save);
+    window.addEventListener("pagehide", saveForUnload);
+    window.addEventListener("beforeunload", saveForUnload);
 
     return () => {
       save();
@@ -359,7 +428,8 @@ export default function Watch() {
       video?.removeEventListener("volumechange", syncVolumeState);
       video?.removeEventListener("pause", save);
       video?.removeEventListener("ended", handleEnded);
-      window.removeEventListener("beforeunload", save);
+      window.removeEventListener("pagehide", saveForUnload);
+      window.removeEventListener("beforeunload", saveForUnload);
     };
   }, [autoPlayNext, episodeNav.next, fileDuration, fileId, isTranscodedPlayback, saveProgress, streamOffset]);
 
@@ -687,7 +757,7 @@ export default function Watch() {
       ) : null}
 
       {hasPlaybackMetadata ? (
-        <video ref={videoRef} src={streamSrc} autoPlay playsInline onClick={showControls} onDoubleClick={togglePlayback}>
+        <video ref={bindVideoRef} src={streamSrc} autoPlay playsInline onClick={showControls} onDoubleClick={togglePlayback}>
           {tracks.subtitleTracks.map((track, index) => (
             <track
               key={`${track.src}-${subtitleOffset.toFixed(2)}-${index}`}

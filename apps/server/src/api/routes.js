@@ -557,9 +557,14 @@ api.get("/health", (_req, res) => {
 
 api.get("/settings", (_req, res) => {
   const config = readAppConfig();
-  res.json({
+  const settings = {
     autoSkipEnabled: config.autoSkipEnabled,
-    autoPlayNextEnabled: config.autoPlayNextEnabled
+    autoPlayNextEnabled: config.autoPlayNextEnabled,
+    tmdbConfigured: hasTmdbKey()
+  };
+  res.json({
+    ...settings,
+    settings
   });
 });
 
@@ -877,14 +882,23 @@ api.get("/home", (_req, res) => {
       e.title AS episode_title,
       e.season_number,
       e.episode_number,
-      MAX(wp.updated_at) AS latest_progress
+      wp.updated_at AS latest_progress
     FROM watch_progress wp
     JOIN files f ON f.id = wp.file_id
     JOIN media_items m ON m.id = f.media_item_id
     LEFT JOIN episodes e ON e.id = f.episode_id
     WHERE wp.watched = 0 AND wp.position > 30 AND m.ignored = 0
-    GROUP BY m.id
-    ORDER BY latest_progress DESC
+      AND wp.id = (
+        SELECT candidate_wp.id
+        FROM watch_progress candidate_wp
+        JOIN files candidate_file ON candidate_file.id = candidate_wp.file_id
+        WHERE candidate_file.media_item_id = m.id
+          AND candidate_wp.watched = 0
+          AND candidate_wp.position > 30
+        ORDER BY candidate_wp.updated_at DESC, candidate_wp.id DESC
+        LIMIT 1
+      )
+    ORDER BY wp.updated_at DESC, wp.id DESC
     LIMIT 20
   `).all().map(mediaWithFile);
 
@@ -970,7 +984,7 @@ api.get("/shows/:id", (req, res) => {
     ORDER BY s.season_number
   `).all(show.id);
   const episodes = db.prepare(`
-    SELECT e.*, f.id AS file_id, f.duration AS file_duration, wp.position, wp.watched
+    SELECT e.*, f.id AS file_id, f.duration AS file_duration, wp.position, wp.watched, wp.updated_at AS progress_updated_at
     FROM episodes e
     LEFT JOIN files f ON f.id = (
       SELECT candidate.id
@@ -1258,17 +1272,15 @@ api.get("/progress/:fileId", (req, res) => {
 });
 
 api.post("/progress/:fileId", (req, res) => {
-  const position = Number(req.body.position || 0);
-  const duration = Number(req.body.duration || 0) || null;
+  const rawPosition = Number(req.body.position || 0);
+  const rawDuration = Number(req.body.duration || 0);
+  const position = Number.isFinite(rawPosition) ? Math.max(0, rawPosition) : 0;
+  const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : null;
   const watched = req.body.watched === true || (duration && position / duration >= 0.9) ? 1 : 0;
-  const file = db.prepare("SELECT media_item_id FROM files WHERE id = ?").get(req.params.fileId);
-  if (file) {
-    db.prepare(`
-      DELETE FROM watch_progress 
-      WHERE watched = 0 
-        AND file_id != ? 
-        AND file_id IN (SELECT id FROM files WHERE media_item_id = ?)
-    `).run(req.params.fileId, file.media_item_id);
+  const file = db.prepare("SELECT id FROM files WHERE id = ?").get(req.params.fileId);
+  if (!file) {
+    res.status(404).json({ error: "File not found" });
+    return;
   }
 
   db.prepare(`

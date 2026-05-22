@@ -26,9 +26,14 @@ export default function ShowDetail() {
   }, [id]);
 
   const episodes = useMemo(() => payload?.episodes?.filter((episode) => episode.season_number === season) || [], [payload, season]);
+  const resumeEpisode = useMemo(() => {
+    return (payload?.episodes || [])
+      .filter((episode) => episode.file_id && episode.position > 30 && !episode.watched)
+      .sort((a, b) => String(b.progress_updated_at || "").localeCompare(String(a.progress_updated_at || "")))[0];
+  }, [payload]);
+
   if (!payload) return <div className="empty-state">Loading show...</div>;
   const { show, seasons } = payload;
-  const resumeEpisode = payload.episodes?.find((episode) => episode.file_id && episode.position > 30 && !episode.watched);
   const firstPlayableEpisode = payload.episodes?.find((episode) => episode.file_id);
   const primaryEpisode = resumeEpisode || firstPlayableEpisode;
 

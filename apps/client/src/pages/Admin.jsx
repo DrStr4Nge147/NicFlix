@@ -292,6 +292,7 @@ export default function Admin() {
         body: JSON.stringify({ tmdbApiKey })
       });
       setSettings(data.settings);
+      window.dispatchEvent(new CustomEvent("nicflix:settings-updated", { detail: data.settings }));
       setTmdbApiKey("");
       showAdminToast(data.test?.message || "TMDB settings saved.");
     } catch (error) {
@@ -315,6 +316,7 @@ export default function Admin() {
     try {
       const data = await apiFetch("/admin/settings/tmdb", { method: "DELETE" });
       setSettings(data.settings);
+      window.dispatchEvent(new CustomEvent("nicflix:settings-updated", { detail: data.settings }));
       setTmdbApiKey("");
       showAdminToast(data.message || "TMDB API key disconnected.");
     } catch (error) {
@@ -329,6 +331,7 @@ export default function Admin() {
         body: JSON.stringify({ [key]: value })
       });
       setSettings((current) => ({ ...current, ...data.settings }));
+      window.dispatchEvent(new CustomEvent("nicflix:settings-updated", { detail: data.settings }));
       showAdminToast("Player settings updated.");
     } catch (error) {
       showAdminToast(error.message, "error");
