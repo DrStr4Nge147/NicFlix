@@ -25,6 +25,31 @@ function getBuildVersion() {
   return cachedBuildVersion;
 }
 
+function getAdminSettings() {
+  const config = readAppConfig();
+  const apiKey = getTmdbApiKey();
+  const appManaged = hasAppManagedTmdbKey();
+  const envManaged = Boolean(process.env.TMDB_API_KEY);
+  const tmdbConfigured = hasTmdbKey();
+
+  return {
+    buildVersion: getBuildVersion(),
+    appVersion: getBuildVersion(),
+    tmdbConfigured,
+    tmdbApiKeyMasked: maskSecret(apiKey),
+    tmdbApiKeySource: config.tmdbDisconnected ? "none" : (appManaged ? "app" : (envManaged ? "env" : "none")),
+    tmdbDisconnected: config.tmdbDisconnected,
+    canDisconnectTmdb: !config.tmdbDisconnected && (tmdbConfigured || appManaged || envManaged),
+    autoSkipEnabled: config.autoSkipEnabled,
+    autoPlayNextEnabled: config.autoPlayNextEnabled,
+    assetPaths: {
+      root: dataRoot,
+      posters: postersRoot,
+      backdrops: backdropsRoot
+    }
+  };
+}
+
 function publicAssetUrl(value) {
   if (!value) return null;
   const trimmed = String(value).trim();
@@ -569,26 +594,8 @@ api.get("/settings", (_req, res) => {
 });
 
 api.get("/admin/settings", (_req, res) => {
-  const config = readAppConfig();
-  const apiKey = getTmdbApiKey();
-  const appManaged = hasAppManagedTmdbKey();
   res.json({
-    settings: {
-      buildVersion: getBuildVersion(),
-      appVersion: getBuildVersion(),
-      tmdbConfigured: hasTmdbKey(),
-      tmdbApiKeyMasked: maskSecret(apiKey),
-      tmdbApiKeySource: config.tmdbDisconnected ? "none" : (appManaged ? "app" : (process.env.TMDB_API_KEY ? "env" : "none")),
-      tmdbDisconnected: config.tmdbDisconnected,
-      canDisconnectTmdb: hasTmdbKey() || appManaged || Boolean(process.env.TMDB_API_KEY),
-      autoSkipEnabled: config.autoSkipEnabled,
-      autoPlayNextEnabled: config.autoPlayNextEnabled,
-      assetPaths: {
-        root: dataRoot,
-        posters: postersRoot,
-        backdrops: backdropsRoot
-      }
-    }
+    settings: getAdminSettings()
   });
 });
 
@@ -597,12 +604,9 @@ api.patch("/admin/settings/player", (req, res) => {
   if (typeof req.body.autoSkipEnabled === "boolean") updates.autoSkipEnabled = req.body.autoSkipEnabled;
   if (typeof req.body.autoPlayNextEnabled === "boolean") updates.autoPlayNextEnabled = req.body.autoPlayNextEnabled;
 
-  const nextConfig = writeAppConfig(updates);
+  writeAppConfig(updates);
   res.json({
-    settings: {
-      autoSkipEnabled: nextConfig.autoSkipEnabled,
-      autoPlayNextEnabled: nextConfig.autoPlayNextEnabled
-    }
+    settings: getAdminSettings()
   });
 });
 
@@ -614,15 +618,7 @@ api.patch("/admin/settings/tmdb", async (req, res, next) => {
     if (!tmdbApiKey) {
       writeAppConfig({ tmdbApiKey: "", tmdbDisconnected: true });
       res.json({
-        settings: {
-          buildVersion: getBuildVersion(),
-          appVersion: getBuildVersion(),
-          tmdbConfigured: hasTmdbKey(),
-          tmdbApiKeyMasked: maskSecret(getTmdbApiKey()),
-          tmdbApiKeySource: "none",
-          tmdbDisconnected: true,
-          canDisconnectTmdb: false
-        },
+        settings: getAdminSettings(),
         test: { ok: true, message: "TMDB API key cleared from app settings." }
       });
       return;
@@ -636,15 +632,7 @@ api.patch("/admin/settings/tmdb", async (req, res, next) => {
 
     writeAppConfig({ tmdbApiKey, tmdbDisconnected: false });
     res.json({
-      settings: {
-        buildVersion: getBuildVersion(),
-        appVersion: getBuildVersion(),
-        tmdbConfigured: hasTmdbKey(),
-        tmdbApiKeyMasked: maskSecret(tmdbApiKey),
-        tmdbApiKeySource: "app",
-        tmdbDisconnected: false,
-        canDisconnectTmdb: true
-      },
+      settings: getAdminSettings(),
       test
     });
   } catch (error) {
@@ -655,15 +643,7 @@ api.patch("/admin/settings/tmdb", async (req, res, next) => {
 api.delete("/admin/settings/tmdb", (_req, res) => {
   writeAppConfig({ tmdbApiKey: "", tmdbDisconnected: true });
   res.json({
-    settings: {
-      buildVersion: getBuildVersion(),
-      appVersion: getBuildVersion(),
-      tmdbConfigured: false,
-      tmdbApiKeyMasked: "",
-      tmdbApiKeySource: "none",
-      tmdbDisconnected: true,
-      canDisconnectTmdb: false
-    },
+    settings: getAdminSettings(),
     message: "TMDB API key disconnected."
   });
 });
@@ -1276,7 +1256,8 @@ api.post("/progress/:fileId", (req, res) => {
   const rawDuration = Number(req.body.duration || 0);
   const position = Number.isFinite(rawPosition) ? Math.max(0, rawPosition) : 0;
   const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : null;
-  const watched = req.body.watched === true || (duration && position / duration >= 0.9) ? 1 : 0;
+  const reachedEnd = duration !== null && position >= duration - 1;
+  const watched = req.body.watched === true || reachedEnd ? 1 : 0;
   const file = db.prepare("SELECT id FROM files WHERE id = ?").get(req.params.fileId);
   if (!file) {
     res.status(404).json({ error: "File not found" });

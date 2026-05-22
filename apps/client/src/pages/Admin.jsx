@@ -50,6 +50,7 @@ export default function Admin() {
   const [adminToast, setAdminToast] = useState(null);
   const [activeTmdbItemId, setActiveTmdbItemId] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [settingsSaving, setSettingsSaving] = useState(null);
   const [tmdbApiKey, setTmdbApiKey] = useState("");
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -94,7 +95,14 @@ export default function Admin() {
     setAdminToast({ message, variant });
     adminToastTimer.current = window.setTimeout(() => {
       setAdminToast(null);
+      adminToastTimer.current = null;
     }, variant === "error" ? 7000 : 5000);
+  }
+
+  function dismissAdminToast() {
+    if (adminToastTimer.current) window.clearTimeout(adminToastTimer.current);
+    adminToastTimer.current = null;
+    setAdminToast(null);
   }
 
   async function scan(library) {
@@ -286,7 +294,9 @@ export default function Admin() {
 
   async function saveTmdbSettings(event) {
     event.preventDefault();
+    if (settingsSaving) return;
     try {
+      setSettingsSaving("tmdb-save");
       const data = await apiFetch("/admin/settings/tmdb", {
         method: "PATCH",
         body: JSON.stringify({ tmdbApiKey })
@@ -297,11 +307,15 @@ export default function Admin() {
       showAdminToast(data.test?.message || "TMDB settings saved.");
     } catch (error) {
       showAdminToast(error.message, "error");
+    } finally {
+      setSettingsSaving(null);
     }
   }
 
   async function testTmdbSettings() {
+    if (settingsSaving) return;
     try {
+      setSettingsSaving("tmdb-test");
       const data = await apiFetch("/admin/settings/tmdb", {
         method: "PATCH",
         body: JSON.stringify({ tmdbApiKey, testOnly: true })
@@ -309,11 +323,15 @@ export default function Admin() {
       showAdminToast(data.test?.message || "TMDB connected successfully.");
     } catch (error) {
       showAdminToast(error.message, "error");
+    } finally {
+      setSettingsSaving(null);
     }
   }
 
   async function disconnectTmdbSettings() {
+    if (settingsSaving) return;
     try {
+      setSettingsSaving("tmdb-disconnect");
       const data = await apiFetch("/admin/settings/tmdb", { method: "DELETE" });
       setSettings(data.settings);
       window.dispatchEvent(new CustomEvent("nicflix:settings-updated", { detail: data.settings }));
@@ -321,20 +339,26 @@ export default function Admin() {
       showAdminToast(data.message || "TMDB API key disconnected.");
     } catch (error) {
       showAdminToast(error.message, "error");
+    } finally {
+      setSettingsSaving(null);
     }
   }
 
   async function togglePlayerSetting(key, value) {
+    if (settingsSaving) return;
     try {
+      setSettingsSaving(`player:${key}`);
       const data = await apiFetch("/admin/settings/player", {
         method: "PATCH",
         body: JSON.stringify({ [key]: value })
       });
-      setSettings((current) => ({ ...current, ...data.settings }));
+      setSettings(data.settings);
       window.dispatchEvent(new CustomEvent("nicflix:settings-updated", { detail: data.settings }));
       showAdminToast("Player settings updated.");
     } catch (error) {
       showAdminToast(error.message, "error");
+    } finally {
+      setSettingsSaving(null);
     }
   }
 
@@ -386,11 +410,8 @@ export default function Admin() {
     matchesContentSearch(item.file_name)
   );
 
-  const canDisconnectTmdb = Boolean(
-    settings?.canDisconnectTmdb
-    || settings?.tmdbConfigured
-    || (settings?.tmdbApiKeySource && settings.tmdbApiKeySource !== "none")
-  );
+  const canDisconnectTmdb = Boolean(settings?.canDisconnectTmdb);
+  const isSettingsSaving = Boolean(settingsSaving);
 
   function confirmDeleteLibrary(library) {
     askForConfirmation({
@@ -452,8 +473,9 @@ export default function Admin() {
                 {settings?.tmdbConfigured ? "Connected" : "Setup Needed"}
               </span>
               {canDisconnectTmdb ? (
-                <button className="ghost-button compact danger-button" type="button" onClick={confirmDisconnectTmdbSettings}>
-                  <Trash2 size={15} /> Disconnect
+                <button className="ghost-button compact danger-button" type="button" onClick={confirmDisconnectTmdbSettings} disabled={isSettingsSaving}>
+                  {settingsSaving === "tmdb-disconnect" ? <RefreshCw className="spin-icon" size={15} /> : <Trash2 size={15} />}
+                  {settingsSaving === "tmdb-disconnect" ? "Disconnecting" : "Disconnect"}
                 </button>
               ) : null}
             </div>
@@ -468,12 +490,14 @@ export default function Admin() {
                   onChange={(event) => setTmdbApiKey(event.target.value)}
                   placeholder={settings?.tmdbConfigured ? "Paste a new v3 API Key to replace the saved one" : "Paste the short API Key from TMDB settings"}
                   autoComplete="off"
+                  disabled={isSettingsSaving}
                 />
                 <button
                   className="icon-button"
                   type="button"
                   onClick={() => setShowTmdbKey((current) => !current)}
                   aria-label={showTmdbKey ? "Hide API key" : "Show API key"}
+                  disabled={isSettingsSaving}
                 >
                   {showTmdbKey ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
@@ -483,11 +507,13 @@ export default function Admin() {
               </span>
             </label>
             <div className="tmdb-button-row">
-              <button className="ghost-button" type="button" onClick={testTmdbSettings} disabled={!tmdbApiKey.trim()}>
-                <RefreshCw size={17} /> Test
+              <button className="ghost-button" type="button" onClick={testTmdbSettings} disabled={!tmdbApiKey.trim() || isSettingsSaving}>
+                <RefreshCw className={settingsSaving === "tmdb-test" ? "spin-icon" : undefined} size={17} />
+                {settingsSaving === "tmdb-test" ? "Testing" : "Test"}
               </button>
-              <button className="primary-button" type="submit" disabled={!tmdbApiKey.trim()}>
-                <Save size={17} /> Save API Key
+              <button className="primary-button" type="submit" disabled={!tmdbApiKey.trim() || isSettingsSaving}>
+                {settingsSaving === "tmdb-save" ? <RefreshCw className="spin-icon" size={17} /> : <Save size={17} />}
+                {settingsSaving === "tmdb-save" ? "Saving" : "Save API Key"}
               </button>
             </div>
           </form>
@@ -516,6 +542,7 @@ export default function Admin() {
                 type="checkbox"
                 checked={settings?.autoSkipEnabled ?? true}
                 onChange={(e) => togglePlayerSetting("autoSkipEnabled", e.target.checked)}
+                disabled={isSettingsSaving}
               />
               <div>
                 <strong>Enable "Skip Intro / Outro" (Experimental)</strong>
@@ -527,6 +554,7 @@ export default function Admin() {
                 type="checkbox"
                 checked={settings?.autoPlayNextEnabled ?? true}
                 onChange={(e) => togglePlayerSetting("autoPlayNextEnabled", e.target.checked)}
+                disabled={isSettingsSaving}
               />
               <div>
                 <strong>Default Auto-play Next Episode</strong>
@@ -817,7 +845,7 @@ export default function Admin() {
       <AdminStatusToast
         toast={adminToast}
         activeTaskToastCount={activeTaskToastCount}
-        onDismiss={() => setAdminToast(null)}
+        onDismiss={dismissAdminToast}
       />
 
       {editing ? (
@@ -1006,7 +1034,7 @@ function AdminStatusToast({ toast, activeTaskToastCount, onDismiss }) {
   return (
     <aside
       className={`task-toast admin-toast admin-toast-${toast.variant}`}
-      role="status"
+      role={toast.variant === "error" ? "alert" : "status"}
       aria-live="polite"
       style={{ "--toast-bottom": bottom }}
     >

@@ -16,19 +16,22 @@ const defaultConfig = {
 
 function readRawConfig() {
   if (!fs.existsSync(configPath)) {
-    return defaultConfig;
+    return { ...defaultConfig };
   }
 
   const raw = fs.readFileSync(configPath, "utf8");
   const parsed = JSON.parse(raw);
-  return {
+  const config = {
     libraries: Array.isArray(parsed.libraries) ? parsed.libraries : [],
     tmdbApiKeyEncrypted: typeof parsed.tmdbApiKeyEncrypted === "string" ? parsed.tmdbApiKeyEncrypted : "",
-    tmdbApiKey: typeof parsed.tmdbApiKey === "string" ? parsed.tmdbApiKey : "",
     tmdbDisconnected: parsed.tmdbDisconnected === true,
     autoSkipEnabled: parsed.autoSkipEnabled === true,
     autoPlayNextEnabled: parsed.autoPlayNextEnabled !== false
   };
+  if (typeof parsed.tmdbApiKey === "string") {
+    config.tmdbApiKey = parsed.tmdbApiKey;
+  }
+  return config;
 }
 
 function getEncryptionKey() {
@@ -82,10 +85,15 @@ export function writeAppConfig(updates) {
     ...updates
   };
 
-  if (Object.hasOwn(nextConfig, "tmdbApiKey")) {
+  if (Object.hasOwn(updates, "tmdbApiKey")) {
     nextConfig.tmdbApiKeyEncrypted = nextConfig.tmdbApiKey
       ? encryptSecret(nextConfig.tmdbApiKey)
       : "";
+    delete nextConfig.tmdbApiKey;
+  } else if (nextConfig.tmdbApiKey && !nextConfig.tmdbApiKeyEncrypted) {
+    nextConfig.tmdbApiKeyEncrypted = encryptSecret(nextConfig.tmdbApiKey);
+    delete nextConfig.tmdbApiKey;
+  } else {
     delete nextConfig.tmdbApiKey;
   }
 
