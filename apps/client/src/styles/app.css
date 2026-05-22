@@ -452,7 +452,8 @@ h2 {
   cursor: grabbing;
 }
 
-.row-scroller.is-dragging .media-card {
+.row-scroller.is-dragging .media-card,
+.row-scroller.is-dragging .episode-card {
   pointer-events: none;
 }
 
@@ -691,7 +692,11 @@ h2 {
   gap: .9rem;
   overflow-x: auto;
   padding: .2rem clamp(1rem, 4vw, 3rem) 1rem 0;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.episode-carousel::-webkit-scrollbar {
+  display: none;
 }
 
 .episode-card {

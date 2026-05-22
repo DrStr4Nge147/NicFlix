@@ -4,6 +4,7 @@ import { ArrowLeft, Play } from "lucide-react";
 import { apiFetch, backdropUrl, posterUrl } from "../lib/api.js";
 import ProgressBar from "../components/ProgressBar.jsx";
 import MediaRow from "../components/MediaRow.jsx";
+import RowCarousel from "../components/RowCarousel.jsx";
 
 function episodeStillUrl(episode, show) {
   if (episode?.still_path?.startsWith?.("http")) return episode.still_path;
@@ -64,7 +65,12 @@ export default function ShowDetail() {
             </button>
           ))}
         </div>
-        <div className="episode-carousel" aria-label={`Season ${season} episodes`}>
+        <RowCarousel
+          ariaLabel={`Season ${season} episodes`}
+          className="episode-row-carousel"
+          scrollerClassName="episode-carousel"
+          scrollKey={season}
+        >
           {episodes.map((episode) => (
             <Link
               className={`episode-card ${!episode.file_id ? "disabled" : ""}`}
@@ -91,7 +97,7 @@ export default function ShowDetail() {
               </div>
             </Link>
           ))}
-        </div>
+        </RowCarousel>
       </div>
       <MediaRow title="Suggested TV Shows" items={payload.relatedShows} />
     </section>
