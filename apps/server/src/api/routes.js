@@ -848,7 +848,8 @@ api.delete("/libraries/:id", (req, res) => {
 
 api.post("/libraries/:id/scan", async (req, res, next) => {
   try {
-    const result = await scanLibrary(req.params.id);
+    const force = req.query.force === "1" || req.body?.force === true;
+    const result = await scanLibrary(req.params.id, { force });
     res.json(result);
   } catch (error) {
     next(error);

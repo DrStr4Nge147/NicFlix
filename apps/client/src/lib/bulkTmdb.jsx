@@ -16,8 +16,10 @@ const idleState = {
 
 function scanSummary(result) {
   const removed = Number(result?.removedFiles || 0);
+  const skipped = Number(result?.skipped || 0);
+  const skippedText = skipped ? ` Skipped ${skipped} unchanged.` : "";
   const cleanup = removed ? ` Removed ${removed} stale ${removed === 1 ? "record" : "records"}.` : "";
-  return `Scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.${cleanup}`;
+  return `Scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.${skippedText}${cleanup}`;
 }
 
 export function BulkTmdbProvider({ children }) {

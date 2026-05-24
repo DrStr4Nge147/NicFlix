@@ -35,8 +35,10 @@ const emptyLibraryForm = {
 
 function scanSummary(result) {
   const removed = Number(result?.removedFiles || 0);
+  const skipped = Number(result?.skipped || 0);
+  const skippedText = skipped ? ` Skipped ${skipped} unchanged.` : "";
   const cleanup = removed ? ` Removed ${removed} stale ${removed === 1 ? "record" : "records"}.` : "";
-  return `scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.${cleanup}`;
+  return `scanned ${result.scanned} files. Added ${result.added}, updated ${result.updated}.${skippedText}${cleanup}`;
 }
 
 export default function Admin() {

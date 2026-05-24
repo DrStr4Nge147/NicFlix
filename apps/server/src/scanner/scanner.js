@@ -143,6 +143,34 @@ function needsMetadataRefresh(item) {
   return !item.tmdb_id || !item.overview || !item.poster_path || !item.backdrop_path;
 }
 
+function expectedMediaType(libraryType) {
+  return libraryType === "tv" ? "tv" : "movie";
+}
+
+function getExistingFileScanState(filePath) {
+  return db.prepare(`
+    SELECT
+      f.id,
+      f.file_size,
+      f.modified_at,
+      m.library_id,
+      m.type AS media_type
+    FROM files f
+    LEFT JOIN media_items m ON m.id = f.media_item_id
+    WHERE f.file_path = ?
+  `).get(filePath);
+}
+
+function fileScanIsCurrent(existingFile, library, stats) {
+  return Boolean(
+    existingFile
+      && Number(existingFile.library_id) === Number(library.id)
+      && existingFile.media_type === expectedMediaType(library.type)
+      && Number(existingFile.file_size) === Number(stats.size)
+      && existingFile.modified_at === stats.mtime.toISOString()
+  );
+}
+
 function normalizeMediaTitle(value) {
   return String(value || "")
     .normalize("NFKD")
@@ -424,7 +452,7 @@ function pruneMissingLibraryFiles(library, scannedPaths) {
   })(missingFileIds);
 }
 
-export async function scanLibrary(libraryId) {
+export async function scanLibrary(libraryId, options = {}) {
   const library = db.prepare("SELECT * FROM libraries WHERE id = ?").get(libraryId);
   if (!library) throw new Error("Library not found");
   const rootStats = await fs.stat(library.path).catch(() => null);
@@ -436,15 +464,21 @@ export async function scanLibrary(libraryId) {
   const scannedPaths = new Set(files);
   let added = 0;
   let updated = 0;
+  let skipped = 0;
 
   for (const filePath of files) {
     const stats = await fs.stat(filePath);
+    const existingFile = getExistingFileScanState(filePath);
+    if (!options.force && fileScanIsCurrent(existingFile, library, stats)) {
+      skipped += 1;
+      continue;
+    }
+
     const parsed = parseMediaFile(filePath, library.type);
     const mediaItem = await upsertMedia({ library, parsed });
     const episode = await upsertEpisode(mediaItem, parsed);
     const technical = await probeFile(filePath);
     const externalSubtitles = await findExternalSubtitles(filePath);
-    const existingFile = db.prepare("SELECT id FROM files WHERE file_path = ?").get(filePath);
     const values = [
       mediaItem.id,
       episode?.id || null,
@@ -492,7 +526,7 @@ export async function scanLibrary(libraryId) {
 
   const pruned = pruneMissingLibraryFiles(library, scannedPaths);
 
-  return { scanned: files.length, added, updated, ...pruned };
+  return { scanned: files.length, added, updated, skipped, ...pruned };
 }
 
 export async function syncConfiguredLibraries() {
