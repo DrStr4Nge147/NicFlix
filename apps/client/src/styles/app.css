@@ -1534,6 +1534,34 @@ h2 {
   padding-right: .35rem;
 }
 
+.library-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: .75rem;
+}
+
+.library-list-header p {
+  margin: 0;
+}
+
+.library-search {
+  width: min(20rem, 100%);
+}
+
+.library-list {
+  max-height: clamp(14rem, calc(100vh - 27rem), 32rem);
+  overflow-y: auto;
+  padding-right: .35rem;
+  scrollbar-width: thin;
+}
+
+.library-list .library-line:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
 .library-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8.5rem;
@@ -1741,17 +1769,24 @@ h2 {
 
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
   z-index: 40;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100dvw;
+  height: 100dvh;
+  overflow: auto;
   padding: 1rem;
   background: rgba(0, 0, 0, .68);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .modal {
   width: min(35rem, 100%);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   overflow: auto;
   display: grid;
   gap: .85rem;
@@ -1769,6 +1804,7 @@ h2 {
 }
 
 .modal input,
+.modal select,
 .modal textarea {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, .12);
@@ -1776,6 +1812,14 @@ h2 {
   background: rgba(255, 255, 255, .07);
   color: #fff;
   padding: .7rem;
+}
+
+.modal select {
+  min-height: 2.55rem;
+}
+
+.modal select option {
+  color: #11131a;
 }
 
 .modal textarea {
@@ -1795,6 +1839,10 @@ h2 {
 
 .folder-modal {
   width: min(42rem, 100%);
+}
+
+.library-modal {
+  width: min(38rem, 100%);
 }
 
 .confirm-modal {
@@ -1960,6 +2008,11 @@ h2 {
 
   .metadata-search {
     width: 100%;
+  }
+
+  .library-list-header {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .library-form,

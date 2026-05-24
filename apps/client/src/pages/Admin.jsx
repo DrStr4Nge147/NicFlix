@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   AlertCircle,
@@ -45,6 +46,7 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState("general");
   const [contentTab, setContentTab] = useState("all");
   const [adminSearchQuery, setAdminSearchQuery] = useState("");
+  const [librarySearchQuery, setLibrarySearchQuery] = useState("");
   const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [libraries, setLibraries] = useState([]);
   const [unmatched, setUnmatched] = useState([]);
@@ -57,6 +59,7 @@ export default function Admin() {
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [editing, setEditing] = useState(null);
   const [libraryForm, setLibraryForm] = useState(emptyLibraryForm);
+  const [editingLibrary, setEditingLibrary] = useState(null);
   const [librarySaveTask, setLibrarySaveTask] = useState(null);
   const [browser, setBrowser] = useState(null);
   const [imageBrowser, setImageBrowser] = useState(null);
@@ -121,26 +124,51 @@ export default function Admin() {
     event.preventDefault();
     if (librarySaveTask?.running) return;
 
-    const editingLibrary = Boolean(libraryForm.id);
     const payload = {
       name: libraryForm.name.trim(),
       type: libraryForm.type,
       path: libraryForm.path.trim()
     };
-    const endpoint = libraryForm.id ? `/libraries/${libraryForm.id}` : "/libraries";
-    const method = libraryForm.id ? "PATCH" : "POST";
     setLibrarySaveTask({
       running: true,
-      message: `${editingLibrary ? "Saving" : "Adding"} ${payload.name || "library"} and scanning media...`
+      message: `Adding ${payload.name || "library"} and scanning media...`
     });
 
     try {
-      const data = await apiFetch(endpoint, { method, body: JSON.stringify(payload) });
+      const data = await apiFetch("/libraries", { method: "POST", body: JSON.stringify(payload) });
       if (!mounted.current) return;
       showAdminToast(data.scan
-        ? `${editingLibrary ? "Library updated" : "Library added"} and ${scanSummary(data.scan)}`
-        : editingLibrary ? "Library updated." : "Library added.");
+        ? `Library added and ${scanSummary(data.scan)}`
+        : "Library added.");
       setLibraryForm(emptyLibraryForm);
+      await load();
+    } catch (error) {
+      if (!mounted.current) return;
+      showAdminToast(error.message, "error");
+    } finally {
+      if (mounted.current) setLibrarySaveTask(null);
+    }
+  }
+
+  async function saveEditingLibrary(event) {
+    event.preventDefault();
+    if (librarySaveTask?.running || !editingLibrary?.id) return;
+
+    const payload = {
+      name: editingLibrary.name.trim(),
+      type: editingLibrary.type,
+      path: editingLibrary.path.trim()
+    };
+    setLibrarySaveTask({
+      running: true,
+      message: `Saving ${payload.name || "library"} and scanning media...`
+    });
+
+    try {
+      const data = await apiFetch(`/libraries/${editingLibrary.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      if (!mounted.current) return;
+      showAdminToast(data.scan ? `Library updated and ${scanSummary(data.scan)}` : "Library updated.");
+      setEditingLibrary(null);
       await load();
     } catch (error) {
       if (!mounted.current) return;
@@ -169,7 +197,7 @@ export default function Admin() {
     try {
       await apiFetch(`/libraries/${library.id}`, { method: "DELETE" });
       showAdminToast("Library removed.");
-      if (libraryForm.id === library.id) setLibraryForm(emptyLibraryForm);
+      if (editingLibrary?.id === library.id) setEditingLibrary(null);
       await load();
     } catch (error) {
       showAdminToast(error.message, "error");
@@ -187,22 +215,26 @@ export default function Admin() {
     }
   }
 
-  async function openBrowser(startPath = libraryForm.path) {
+  async function openBrowser(startPath = libraryForm.path, target = "add-library") {
     try {
       const pathQuery = startPath ? `?path=${encodeURIComponent(startPath)}` : "";
       const data = await apiFetch(`/fs/directories${pathQuery}`);
-      setBrowser(data);
+      setBrowser({ ...data, target });
     } catch (error) {
       showAdminToast(error.message, "error");
     }
   }
 
   async function browseTo(folderPath) {
-    await openBrowser(folderPath);
+    await openBrowser(folderPath, browser?.target || "add-library");
   }
 
   function chooseBrowsedFolder() {
-    setLibraryForm((current) => ({ ...current, path: browser.currentPath }));
+    if (browser.target === "edit-library") {
+      setEditingLibrary((current) => current ? ({ ...current, path: browser.currentPath }) : current);
+    } else {
+      setLibraryForm((current) => ({ ...current, path: browser.currentPath }));
+    }
     setBrowser(null);
   }
 
@@ -412,6 +444,16 @@ export default function Admin() {
     matchesContentSearch(item.file_name)
   );
 
+  const normalizedLibrarySearch = librarySearchQuery.trim().toLowerCase();
+  const filteredLibraries = libraries.filter((library) => {
+    if (!normalizedLibrarySearch) return true;
+    return [
+      library.name,
+      library.type === "tv" ? "tv shows" : "movies",
+      library.path
+    ].some((value) => value?.toLowerCase().includes(normalizedLibrarySearch));
+  });
+
   const canDisconnectTmdb = Boolean(settings?.canDisconnectTmdb);
   const isSettingsSaving = Boolean(settingsSaving);
 
@@ -613,7 +655,7 @@ export default function Admin() {
                   disabled={librarySaveRunning}
                   required
                 />
-                <button className="ghost-button" type="button" onClick={() => openBrowser()} disabled={librarySaveRunning}>
+                <button className="ghost-button" type="button" onClick={() => openBrowser(libraryForm.path, "add-library")} disabled={librarySaveRunning}>
                   <Folder size={17} /> Browse
                 </button>
               </div>
@@ -622,12 +664,9 @@ export default function Admin() {
               <button className="primary-button" type="submit" disabled={librarySaveRunning}>
                 {librarySaveRunning
                   ? <RefreshCw className="spin-icon" size={17} />
-                  : libraryForm.id ? <Save size={17} /> : <FolderPlus size={17} />}
-                {librarySaveRunning ? (libraryForm.id ? "Saving" : "Adding") : libraryForm.id ? "Save" : "Add"}
+                  : <FolderPlus size={17} />}
+                {librarySaveRunning ? "Adding" : "Add"}
               </button>
-              {libraryForm.id ? (
-                <button className="ghost-button" type="button" onClick={() => setLibraryForm(emptyLibraryForm)} disabled={librarySaveRunning}>Cancel</button>
-              ) : null}
             </div>
             {librarySaveRunning ? (
               <div className="library-save-progress" role="status" aria-live="polite">
@@ -638,31 +677,47 @@ export default function Admin() {
               </div>
             ) : null}
           </form>
-          {libraries.map((library) => (
-            <div className="library-line" key={library.id}>
-              <div>
-                <strong>{library.name} <small>{library.type === "tv" ? "TV" : "Movies"}</small></strong>
-                <span title={library.path}>{library.path}</span>
+          <div className="library-list-header">
+            <p className="muted">
+              {filteredLibraries.length} of {libraries.length} {libraries.length === 1 ? "library" : "libraries"}
+            </p>
+            <label className="metadata-search library-search" aria-label="Search libraries">
+              <Search size={16} />
+              <input
+                value={librarySearchQuery}
+                onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                placeholder="Search libraries..."
+              />
+            </label>
+          </div>
+          <div className="library-list" aria-label="Configured media libraries">
+            {filteredLibraries.map((library) => (
+              <div className="library-line" key={library.id}>
+                <div>
+                  <strong>{library.name} <small>{library.type === "tv" ? "TV" : "Movies"}</small></strong>
+                  <span title={library.path}>{library.path}</span>
+                </div>
+                <div className="row-actions">
+                  <button
+                    className="icon-button"
+                    onClick={() => scan(library)}
+                    disabled={scanTask.running}
+                    aria-label={`Scan ${library.name}`}
+                  >
+                    <RefreshCw size={18} />
+                  </button>
+                  <button className="icon-button" onClick={() => setEditingLibrary({ ...library })} aria-label={`Edit ${library.name}`}>
+                    <Pencil size={17} />
+                  </button>
+                  <button className="icon-button danger" onClick={() => confirmDeleteLibrary(library)} aria-label={`Remove ${library.name}`}>
+                    <Trash2 size={17} />
+                  </button>
+                </div>
               </div>
-              <div className="row-actions">
-                <button
-                  className="icon-button"
-                  onClick={() => scan(library)}
-                  disabled={scanTask.running}
-                  aria-label={`Scan ${library.name}`}
-                >
-                  <RefreshCw size={18} />
-                </button>
-                <button className="icon-button" onClick={() => setLibraryForm(library)} aria-label={`Edit ${library.name}`}>
-                  <Pencil size={17} />
-                </button>
-                <button className="icon-button danger" onClick={() => confirmDeleteLibrary(library)} aria-label={`Remove ${library.name}`}>
-                  <Trash2 size={17} />
-                </button>
-              </div>
-            </div>
-          ))}
-          {!libraries.length ? <p className="muted">No libraries yet. Add your first media folder above.</p> : null}
+            ))}
+            {!libraries.length ? <p className="muted">No libraries yet. Add your first media folder above.</p> : null}
+            {libraries.length && !filteredLibraries.length ? <p className="muted">No libraries match your search.</p> : null}
+          </div>
         </div>
       </div>
     );
@@ -765,6 +820,7 @@ export default function Admin() {
   }
 
   const activeTaskToastCount = [bulkTmdb, scanTask].filter((task) => task.running || task.message).length;
+  const isLibrarySaving = Boolean(librarySaveTask?.running);
 
   return (
     <section className="page-pad admin-page">
@@ -849,6 +905,83 @@ export default function Admin() {
         activeTaskToastCount={activeTaskToastCount}
         onDismiss={dismissAdminToast}
       />
+
+      {createPortal(
+        <>
+      {editingLibrary ? (
+        <div
+          className="modal-backdrop"
+          onPointerDown={trackBackdropPointerDown}
+          onClick={(event) => closeOnBackdropClick(event, () => {
+            if (!isLibrarySaving) setEditingLibrary(null);
+          })}
+        >
+          <form
+            className="modal library-modal"
+            onSubmit={saveEditingLibrary}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-modal-title"
+          >
+            <h2 id="library-modal-title">Edit Library</h2>
+            <label>
+              Name
+              <input
+                value={editingLibrary.name}
+                onChange={(event) => setEditingLibrary((current) => ({ ...current, name: event.target.value }))}
+                disabled={isLibrarySaving}
+                required
+              />
+            </label>
+            <label>
+              Type
+              <select
+                value={editingLibrary.type}
+                onChange={(event) => setEditingLibrary((current) => ({ ...current, type: event.target.value }))}
+                disabled={isLibrarySaving}
+              >
+                <option value="movies">Movies</option>
+                <option value="tv">TV Shows</option>
+              </select>
+            </label>
+            <label>
+              Folder Path
+              <div className="path-picker">
+                <input
+                  value={editingLibrary.path}
+                  onChange={(event) => setEditingLibrary((current) => ({ ...current, path: event.target.value }))}
+                  disabled={isLibrarySaving}
+                  required
+                />
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => openBrowser(editingLibrary.path, "edit-library")}
+                  disabled={isLibrarySaving}
+                >
+                  <Folder size={17} /> Browse
+                </button>
+              </div>
+            </label>
+            {isLibrarySaving ? (
+              <div className="library-save-progress" role="status" aria-live="polite">
+                <span>{librarySaveTask.message}</span>
+                <div className="task-progress task-progress-active" aria-label="Library save in progress">
+                  <div />
+                </div>
+              </div>
+            ) : null}
+            <div className="modal-actions">
+              <button className="ghost-button" type="button" onClick={() => setEditingLibrary(null)} disabled={isLibrarySaving}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={isLibrarySaving}>
+                {isLibrarySaving ? <RefreshCw className="spin-icon" size={17} /> : <Save size={17} />}
+                {isLibrarySaving ? "Saving" : "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {editing ? (
         <div
@@ -1022,6 +1155,9 @@ export default function Admin() {
           </div>
         </div>
       ) : null}
+        </>,
+        document.body
+      )}
     </section>
   );
 }
