@@ -953,7 +953,7 @@ export default function Watch() {
                       onClick={() => toggleSeason(season.season_number)}
                       aria-expanded={openSeasons[season.season_number]}
                     >
-                      {season.title || `Season ${season.season_number}`}
+                      <span className="season-title">{season.title || `Season ${season.season_number}`}</span>
                     </button>
                     {openSeasons[season.season_number] ? (
                       <div className="watch-playlist-episodes">
