@@ -19,9 +19,10 @@ export const configPath = resolveFromServer(process.env.CONFIG_PATH, "../../conf
 export const dataRoot = path.resolve(process.env.DATA_ROOT || path.join(repoRoot, "data"));
 export const postersRoot = path.join(dataRoot, "posters");
 export const backdropsRoot = path.join(dataRoot, "backdrops");
+export const thumbnailsRoot = path.join(dataRoot, "thumbnails");
 
 export function ensureDataDirs() {
-  for (const dir of [dataRoot, postersRoot, backdropsRoot, path.join(dataRoot, "thumbnails")]) {
+  for (const dir of [dataRoot, postersRoot, backdropsRoot, thumbnailsRoot]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }

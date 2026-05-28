@@ -9,6 +9,7 @@ import { maskSecret, readAppConfig, writeAppConfig, getTmdbApiKey, hasAppManaged
 import { backdropsRoot, dataRoot, postersRoot, repoRoot } from "../config/paths.js";
 import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
 import { ffmpeg } from "../media/ffmpegTools.js";
+import { getTimelineThumbnails } from "../media/timelineThumbnails.js";
 
 export const api = express.Router();
 
@@ -1106,6 +1107,20 @@ api.get("/files/:fileId/context", (req, res) => {
     return;
   }
   res.json({ context });
+});
+
+api.get("/files/:fileId/thumbnails", async (req, res, next) => {
+  const file = getPlayableFile(req.params.fileId);
+  if (!file) {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+
+  try {
+    res.json(await getTimelineThumbnails(file));
+  } catch (error) {
+    next(error);
+  }
 });
 
 api.get("/files/:fileId/segments", async (req, res) => {

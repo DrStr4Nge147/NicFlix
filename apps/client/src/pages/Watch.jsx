@@ -92,6 +92,19 @@ function reliableDuration(video, fallbackDuration) {
   return Number.isFinite(fileDuration) && fileDuration > 0 ? fileDuration : 0;
 }
 
+function nearestTimelineThumbnail(timelineThumbnails, time) {
+  const thumbnails = timelineThumbnails?.thumbnails || [];
+  if (!thumbnails.length) return null;
+  const interval = Number(timelineThumbnails.interval || 0);
+  if (interval > 0) {
+    const index = Math.min(thumbnails.length - 1, Math.max(0, Math.round(time / interval)));
+    return thumbnails[index] || null;
+  }
+  return thumbnails.reduce((nearest, item) => (
+    Math.abs(item.time - time) < Math.abs(nearest.time - time) ? item : nearest
+  ), thumbnails[0]);
+}
+
 export default function Watch() {
   const { fileId } = useParams();
   const navigate = useNavigate();
@@ -121,6 +134,8 @@ export default function Watch() {
   const [segments, setSegments] = useState([]);
   const [activeSegment, setActiveSegment] = useState(null);
   const [globalSettings, setGlobalSettings] = useState(null);
+  const [timelineThumbnails, setTimelineThumbnails] = useState({ status: "idle", thumbnails: [] });
+  const [seekPreview, setSeekPreview] = useState(null);
   const isTranscodedPlayback = playbackInfo?.directPlay === false || playbackContext?.directPlay === false;
   const fileDuration = Number(playbackInfo?.duration || playbackContext?.duration || 0) || 0;
   const hasPlaybackMetadata = Boolean(playbackInfo || playbackContext);
@@ -250,6 +265,8 @@ export default function Watch() {
     setCurrentTime(0);
     setDuration(0);
     setStreamOffset(0);
+    setTimelineThumbnails({ status: "idle", thumbnails: [] });
+    setSeekPreview(null);
     resumeAfterSourceChangeRef.current = null;
     let cancelled = false;
     apiFetch(`/files/${fileId}/tracks`)
@@ -316,6 +333,46 @@ export default function Watch() {
       cancelled = true;
     };
   }, [fileId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+
+    function loadTimelineThumbnails() {
+      apiFetch(`/files/${fileId}/thumbnails`)
+        .then((data) => {
+          if (cancelled) return;
+          setTimelineThumbnails(data || { status: "unavailable", thumbnails: [] });
+          if (data?.status === "generating") {
+            timer = window.setTimeout(loadTimelineThumbnails, 3000);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setTimelineThumbnails({ status: "unavailable", thumbnails: [] });
+        });
+    }
+
+    loadTimelineThumbnails();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [fileId]);
+
+  useEffect(() => {
+    if (!timelineThumbnails?.thumbnails?.length) return undefined;
+    const urls = [...new Set((timelineThumbnails.thumbnails || []).map((item) => item.src).filter(Boolean))];
+    const images = urls.map((src) => {
+      const image = new Image();
+      image.src = src;
+      return image;
+    });
+    return () => {
+      images.forEach((image) => {
+        image.src = "";
+      });
+    };
+  }, [timelineThumbnails]);
 
   useEffect(() => {
     if (!playbackContext || playbackContext.type !== "tv" || !playbackContext.mediaItemId) {
@@ -681,6 +738,31 @@ export default function Watch() {
     seekTo(Number(event.target.value));
   }
 
+  function updateSeekPreview(event) {
+    const mediaDuration = duration || fileDuration;
+    if (!mediaDuration || !timelineThumbnails?.thumbnails?.length) {
+      setSeekPreview(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width) return;
+    const x = Math.min(rect.width, Math.max(0, event.clientX - rect.left));
+    const time = (x / rect.width) * mediaDuration;
+    const thumbnail = nearestTimelineThumbnail(timelineThumbnails, time);
+    if (!thumbnail) {
+      setSeekPreview(null);
+      return;
+    }
+
+    setSeekPreview({ x, time, thumbnail });
+    showControls();
+  }
+
+  function hideSeekPreview() {
+    setSeekPreview(null);
+  }
+
   function toggleMute() {
     const video = videoRef.current;
     if (!video) return;
@@ -802,17 +884,40 @@ export default function Watch() {
       ) : null}
 
       <div className="watch-controls">
-        <input
-          className="watch-seek"
-          type="range"
-          min="0"
-          max={duration || 0}
-          step="0.1"
-          value={Math.min(currentTime, duration || currentTime)}
-          onChange={seek}
-          aria-label="Playback position"
-          style={{ "--progress": `${duration ? (currentTime / duration) * 100 : 0}%` }}
-        />
+        <div
+          className="watch-seek-shell"
+          onPointerDown={updateSeekPreview}
+          onPointerMove={updateSeekPreview}
+          onPointerLeave={hideSeekPreview}
+        >
+          {seekPreview?.thumbnail ? (
+            <div
+              className="watch-seek-preview"
+              style={{
+                "--preview-left": `${seekPreview.x}px`,
+                width: `${seekPreview.thumbnail.width}px`,
+                height: `${seekPreview.thumbnail.height}px`,
+                backgroundImage: `url(${seekPreview.thumbnail.src})`,
+                backgroundPosition: `-${seekPreview.thumbnail.x}px -${seekPreview.thumbnail.y}px`,
+                backgroundSize: `${seekPreview.thumbnail.sheetWidth}px ${seekPreview.thumbnail.sheetHeight}px`
+              }}
+              aria-hidden="true"
+            >
+              <span>{formatTime(seekPreview.time)}</span>
+            </div>
+          ) : null}
+          <input
+            className="watch-seek"
+            type="range"
+            min="0"
+            max={duration || 0}
+            step="0.1"
+            value={Math.min(currentTime, duration || currentTime)}
+            onChange={seek}
+            aria-label="Playback position"
+            style={{ "--progress": `${duration ? (currentTime / duration) * 100 : 0}%` }}
+          />
+        </div>
         <div className="watch-control-row">
           <button className="watch-control-button" type="button" onClick={togglePlayback} aria-label={isPlaying ? "Pause" : "Play"}>
             {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
