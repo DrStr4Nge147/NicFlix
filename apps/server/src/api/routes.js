@@ -10,6 +10,7 @@ import { backdropsRoot, dataRoot, postersRoot, repoRoot } from "../config/paths.
 import { searchTmdb, fetchMovieMetadata, fetchTvMetadata, fetchTvSeasonMetadata, hasTmdbKey, testTmdbApiKey } from "../metadata/tmdb.js";
 import { ffmpeg } from "../media/ffmpegTools.js";
 import { getTimelineThumbnails } from "../media/timelineThumbnails.js";
+import { addIntroDbSegment, markerRowToSegment, mergeSegmentSources, normalizeSegmentType, parseSegmentTime } from "../media/skipSegments.js";
 
 export const api = express.Router();
 
@@ -43,6 +44,7 @@ function getAdminSettings() {
     canDisconnectTmdb: !config.tmdbDisconnected && (tmdbConfigured || appManaged || envManaged),
     autoSkipEnabled: config.autoSkipEnabled,
     autoPlayNextEnabled: config.autoPlayNextEnabled,
+    markerCorrectionEnabled: config.markerCorrectionEnabled,
     assetPaths: {
       root: dataRoot,
       posters: postersRoot,
@@ -269,12 +271,16 @@ function streamBrowserTranscode(file, req, res, next) {
 }
 
 function parseTime(val) {
-  if (typeof val === "number") return val;
-  if (!val) return 0;
-  const parts = String(val).split(":").map(Number);
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return Number(val) || 0;
+  return parseSegmentTime(val);
+}
+
+function getSkipMarkerSegments(fileId, fallbackDuration) {
+  return db.prepare(`
+    SELECT type, start, end, source
+    FROM skip_markers
+    WHERE file_id = ?
+    ORDER BY start ASC
+  `).all(fileId).map((row) => markerRowToSegment(row, fallbackDuration));
 }
 
 function preferredEpisodeFileJoinSql() {
@@ -586,6 +592,7 @@ api.get("/settings", (_req, res) => {
   const settings = {
     autoSkipEnabled: config.autoSkipEnabled,
     autoPlayNextEnabled: config.autoPlayNextEnabled,
+    markerCorrectionEnabled: config.markerCorrectionEnabled,
     tmdbConfigured: hasTmdbKey()
   };
   res.json({
@@ -604,6 +611,7 @@ api.patch("/admin/settings/player", (req, res) => {
   const updates = {};
   if (typeof req.body.autoSkipEnabled === "boolean") updates.autoSkipEnabled = req.body.autoSkipEnabled;
   if (typeof req.body.autoPlayNextEnabled === "boolean") updates.autoPlayNextEnabled = req.body.autoPlayNextEnabled;
+  if (typeof req.body.markerCorrectionEnabled === "boolean") updates.markerCorrectionEnabled = req.body.markerCorrectionEnabled;
 
   writeAppConfig(updates);
   res.json({
@@ -1128,7 +1136,10 @@ api.get("/files/:fileId/segments", async (req, res) => {
   if (!config.autoSkipEnabled) return res.json({ segments: [] });
 
   const context = getPlaybackContext(req.params.fileId);
-  if (!context || !context.tmdbId) return res.json({ segments: [] });
+  if (!context) return res.json({ segments: [] });
+
+  const manualSegments = getSkipMarkerSegments(req.params.fileId, context.duration);
+  if (!context.tmdbId) return res.json({ segments: manualSegments });
 
   let { imdbId, tmdbId, seasonNumber, episodeNumber, type } = context;
   const isTv = type === "tv" && seasonNumber !== null && episodeNumber !== null;
@@ -1145,7 +1156,7 @@ api.get("/files/:fileId/segments", async (req, res) => {
 
     if (!imdbId) {
       console.warn(`Could not resolve IMDb ID for TMDB ${tmdbId}`);
-      return res.json({ segments: [] });
+      return res.json({ segments: manualSegments });
     }
 
     const url = isTv
@@ -1164,47 +1175,91 @@ api.get("/files/:fileId/segments", async (req, res) => {
     if (rawData) {
       if (Array.isArray(rawData)) {
         rawData.forEach((s) => {
-          const start = s.startTime ?? s.start_sec ?? s.startAt ?? s.start ?? null;
-          const end = s.endTime ?? s.end_sec ?? s.endAt ?? s.end ?? null;
-          if (start !== null && end !== null) {
-            segments.push({ start: parseTime(start), end: parseTime(end), type: s.segment_type || s.type || "intro" });
-          }
+          addIntroDbSegment(segments, s, "intro", context.duration);
         });
       } else {
         // Handle nested structure: { intro: { start_sec, ... }, recap: ... }
         ["intro", "recap", "outro", "credits"].forEach((key) => {
           const s = rawData[key];
-          if (s && (s.start_sec !== undefined || s.startTime !== undefined)) {
-            segments.push({
-              start: parseTime(s.start_sec ?? s.startTime),
-              end: parseTime(s.end_sec ?? s.endTime),
-              type: key
-            });
-          }
+          if (s) addIntroDbSegment(segments, s, key, context.duration);
         });
         // Handle { segments: [...] }
         if (segments.length === 0 && Array.isArray(rawData.segments)) {
           rawData.segments.forEach((s) => {
-            const start = s.startTime ?? s.start_sec ?? s.startAt ?? s.start ?? null;
-            const end = s.endTime ?? s.end_sec ?? s.endAt ?? s.end ?? null;
-            if (start !== null && end !== null) {
-              segments.push({ start: parseTime(start), end: parseTime(end), type: s.segment_type || s.type || "intro" });
-            }
+            addIntroDbSegment(segments, s, "intro", context.duration);
           });
         }
       }
     }
 
-    console.log("Normalized segments:", segments);
-    res.json({ segments });
+    const mergedSegments = mergeSegmentSources(segments, manualSegments);
+    console.log("Normalized segments:", mergedSegments);
+    res.json({ segments: mergedSegments });
   } catch (error) {
     if (error.response?.status === 404) {
       console.log(`No segments found in IntroDB for ${imdbId || tmdbId}`);
     } else {
       console.error("IntroDB lookup failed:", error.message);
     }
-    res.json({ segments: [] });
+    res.json({ segments: manualSegments });
   }
+});
+
+api.put("/files/:fileId/segments/:type", (req, res) => {
+  const config = readAppConfig();
+  if (!config.markerCorrectionEnabled) {
+    res.status(403).json({ error: "Marker correction controls are disabled in Admin settings." });
+    return;
+  }
+
+  const context = getPlaybackContext(req.params.fileId);
+  if (!context) {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+
+  const type = normalizeSegmentType(req.params.type);
+  if (!["intro", "recap", "outro", "credits"].includes(type)) {
+    res.status(400).json({ error: "Unsupported marker type." });
+    return;
+  }
+
+  const start = Number(req.body?.start);
+  if (!Number.isFinite(start) || start < 0) {
+    res.status(400).json({ error: "Marker start time must be a valid timestamp." });
+    return;
+  }
+
+  const duration = Number(context.duration || 0);
+  const clampedStart = duration > 0 ? Math.min(start, Math.max(0, duration - 1)) : start;
+  const rawEnd = Number(req.body?.end);
+  const isOutro = type === "outro" || type === "credits";
+  const end = Number.isFinite(rawEnd) && rawEnd > clampedStart
+    ? (duration > 0 ? Math.min(rawEnd, duration) : rawEnd)
+    : null;
+
+  if (!isOutro && end === null) {
+    res.status(400).json({ error: "Intro and recap markers need an end time." });
+    return;
+  }
+
+  db.prepare(`
+    INSERT INTO skip_markers (file_id, type, start, end, source, updated_at)
+    VALUES (?, ?, ?, ?, 'manual', ?)
+    ON CONFLICT(file_id, type) DO UPDATE SET
+      start = excluded.start,
+      end = excluded.end,
+      source = excluded.source,
+      updated_at = excluded.updated_at
+  `).run(req.params.fileId, type, clampedStart, end, nowIso());
+
+  const marker = db.prepare("SELECT type, start, end, source FROM skip_markers WHERE file_id = ? AND type = ?")
+    .get(req.params.fileId, type);
+
+  res.json({
+    marker: markerRowToSegment(marker, context.duration),
+    segments: getSkipMarkerSegments(req.params.fileId, context.duration)
+  });
 });
 
 api.get("/files/:fileId/next", (req, res) => {

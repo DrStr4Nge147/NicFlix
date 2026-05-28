@@ -3,5 +3,6 @@
   "tmdbApiKeyEncrypted": "",
   "tmdbDisconnected": false,
   "autoSkipEnabled": false,
-  "autoPlayNextEnabled": true
+  "autoPlayNextEnabled": true,
+  "markerCorrectionEnabled": false
 }

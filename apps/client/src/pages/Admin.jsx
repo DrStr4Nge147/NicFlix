@@ -400,7 +400,7 @@ export default function Admin() {
     {
       tab: "general",
       title: "General settings",
-      description: "TMDB API, metadata connection, player features, skip intro, auto-play next",
+      description: "TMDB API, metadata connection, player features, skip intro, auto-play next, marker correction",
       icon: Settings
     },
     {
@@ -579,7 +579,7 @@ export default function Admin() {
 
         <div className="panel player-settings-panel">
           <h3>Player Features</h3>
-          <p className="muted">Global defaults for the video player. Users can still adjust these during playback.</p>
+          <p className="muted">Global defaults for the video player.</p>
           <div className="settings-toggles">
             <label className="toggle-label">
               <input
@@ -603,6 +603,18 @@ export default function Admin() {
               <div>
                 <strong>Default Auto-play Next Episode</strong>
                 <p className="muted">Automatically counts down to the next episode when the current one ends.</p>
+              </div>
+            </label>
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={settings?.markerCorrectionEnabled ?? false}
+                onChange={(e) => togglePlayerSetting("markerCorrectionEnabled", e.target.checked)}
+                disabled={isSettingsSaving}
+              />
+              <div>
+                <strong>Show Marker Correction Controls</strong>
+                <p className="muted">Adds an admin timing button in the player so you can save the credits start time while watching. Requires skip intro/outro to be enabled.</p>
               </div>
             </label>
           </div>

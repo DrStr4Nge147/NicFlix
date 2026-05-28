@@ -1,6 +1,6 @@
 {
   "name": "nicflix",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Local-first media server for browsing and streaming your own movie and TV library.",
   "private": true,
   "main": "electron/main.cjs",

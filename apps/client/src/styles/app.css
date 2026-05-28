@@ -1108,6 +1108,21 @@ h2 {
   text-shadow: 0 1px 4px rgba(0, 0, 0, .8);
 }
 
+.watch-marker-status {
+  max-width: min(18rem, 28vw);
+  color: #cfd5e1;
+  font-size: .82rem;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .8);
+}
+
+.watch-marker-status.error {
+  color: #fecaca;
+}
+
 .watch-control-spacer {
   flex: 1;
 }
@@ -1294,69 +1309,84 @@ h2 {
   box-shadow: 0 0 8px rgba(34, 197, 94, .4);
 }
 
-.next-up-panel {
+.watch-next-up {
   position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 15;
-  width: min(24rem, calc(100vw - 2rem));
-  padding: 1rem;
-  color: #fff;
-  background: rgba(15, 17, 24, .9);
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: .5rem;
-  box-shadow: 0 22px 68px rgba(0, 0, 0, .58);
-  backdrop-filter: blur(18px);
-}
-
-.next-up-panel h2 {
-  margin-bottom: .35rem;
-}
-
-.next-up-panel p {
-  margin-bottom: .85rem;
-  color: #cfd5e1;
-}
-
-.next-up-autoplay {
-  display: inline-flex;
-  gap: .5rem;
-  align-items: center;
-  margin-bottom: .85rem;
-  color: #dfe3ec;
-  font-weight: 800;
-}
-
-.next-up-autoplay input {
-  width: 1rem;
-  height: 1rem;
-  accent-color: #e63b3b;
-}
-
-.next-up-close {
-  position: absolute;
-  top: .65rem;
-  right: .65rem;
-  display: grid;
-  place-items: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  color: #d7dbe4;
-  background: rgba(255, 255, 255, .1);
-  border: 0;
-  border-radius: .35rem;
-}
-
-.next-up-actions {
+  right: clamp(1.25rem, 4vw, 3.5rem);
+  bottom: 8.5rem;
+  z-index: 16;
   display: flex;
-  gap: .75rem;
   align-items: center;
-  flex-wrap: wrap;
+  gap: .65rem;
+  max-width: calc(100vw - 2rem);
+  transition: opacity .2s ease, transform .25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.next-up-actions span {
-  color: #cfd5e1;
-  font-weight: 800;
+.watch-next-up.controls-hidden {
+  opacity: .65;
+  transform: translateX(.5rem);
+}
+
+.watch-next-up.controls-hidden:hover {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.watch-next-button,
+.watch-next-cancel {
+  min-height: 3rem;
+  border: 0;
+  border-radius: .5rem;
+  font-size: 1.02rem;
+  font-weight: 850;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, .52);
+  cursor: pointer;
+}
+
+.watch-next-button {
+  position: relative;
+  overflow: hidden;
+  padding: 0 1.35rem;
+  color: #11131a;
+  background: #fff;
+}
+
+.watch-next-button span {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+}
+
+.watch-next-button.progressing::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: rgba(230, 59, 59, .38);
+  animation: watch-next-progress var(--next-up-duration, 5s) linear forwards;
+}
+
+.watch-next-button:hover {
+  transform: scale(1.04);
+}
+
+.watch-next-cancel {
+  padding: 0 1.1rem;
+  color: #fff;
+  background: rgba(15, 17, 24, .86);
+  border: 1px solid rgba(255, 255, 255, .18);
+  backdrop-filter: blur(14px);
+}
+
+.watch-next-cancel:hover {
+  background: rgba(255, 255, 255, .16);
+}
+
+@keyframes watch-next-progress {
+  to {
+    width: 100%;
+  }
 }
 
 .watch-back-button:hover,
@@ -2104,6 +2134,12 @@ h2 {
     font-size: .78rem;
   }
 
+  .watch-marker-status {
+    flex-basis: 100%;
+    max-width: 100%;
+    font-size: .76rem;
+  }
+
   .watch-control-spacer {
     flex: 0 0 100%;
     height: 0;
@@ -2117,11 +2153,9 @@ h2 {
     max-height: min(18rem, 48vh);
   }
 
-  .next-up-panel {
-    left: .75rem;
+  .watch-next-up {
     right: .75rem;
-    bottom: 7.4rem;
-    width: auto;
+    bottom: 7.5rem;
   }
 }
 
@@ -2153,17 +2187,14 @@ h2 {
   .icon-button,
   .admin-button,
   .card-remove-button,
-  .watch-control-button,
-  .next-up-close {
+  .watch-control-button {
     flex: 0 0 auto;
   }
 
   .hero-actions .primary-button,
   .hero-actions .ghost-button,
   .modal-actions .primary-button,
-  .modal-actions .ghost-button,
-  .next-up-actions .primary-button,
-  .next-up-actions .ghost-button {
+  .modal-actions .ghost-button {
     width: auto;
   }
 
@@ -2261,6 +2292,23 @@ h2 {
 }
 
 @media (max-width: 520px) {
+  .watch-next-up {
+    left: .75rem;
+    right: .75rem;
+    bottom: 6.9rem;
+  }
+
+  .watch-next-button,
+  .watch-next-cancel {
+    min-width: 0;
+    min-height: 2.75rem;
+    font-size: .95rem;
+  }
+
+  .watch-next-button {
+    flex: 1;
+  }
+
   .watch-skip-button {
     left: .75rem;
     right: .75rem;

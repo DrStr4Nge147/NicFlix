@@ -98,6 +98,18 @@ export function migrate() {
       updated_at TEXT NOT NULL,
       FOREIGN KEY (file_id) REFERENCES files(id)
     );
+
+    CREATE TABLE IF NOT EXISTS skip_markers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      start REAL NOT NULL,
+      end REAL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      updated_at TEXT NOT NULL,
+      UNIQUE(file_id, type),
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
   `);
 
   const fileColumns = db.prepare("PRAGMA table_info(files)").all().map((column) => column.name);

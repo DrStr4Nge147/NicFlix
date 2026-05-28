@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, AudioLines, Captions, List, Maximize, Pause, PictureInPicture2, Play, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Clock3, List, Maximize, Pause, PictureInPicture2, Play, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
 import { apiFetch } from "../lib/api.js";
 
 function formatTime(seconds = 0) {
@@ -44,6 +44,12 @@ function cueTextLines(cue) {
 
 const PLAYER_VOLUME_KEY = "nicflix.playerVolume";
 const PLAYER_MUTED_KEY = "nicflix.playerMuted";
+const NEXT_UP_COUNTDOWN_SECONDS = 5;
+const OUTRO_SEGMENT_TYPES = new Set(["outro", "credits"]);
+
+function isOutroSegment(segment) {
+  return OUTRO_SEGMENT_TYPES.has(segment?.type);
+}
 
 function clampVolume(value) {
   const volume = Number(value);
@@ -123,7 +129,7 @@ export default function Watch() {
   const [episodeNav, setEpisodeNav] = useState({ previous: null, next: null });
   const [nextUp, setNextUp] = useState(null);
   const [countdown, setCountdown] = useState(null);
-  const [autoPlayNext, setAutoPlayNext] = useState(() => localStorage.getItem("nicflix.autoplayNext") !== "false");
+  const [autoPlayNext, setAutoPlayNext] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -133,7 +139,10 @@ export default function Watch() {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [segments, setSegments] = useState([]);
   const [activeSegment, setActiveSegment] = useState(null);
+  const [dismissedNextUpKey, setDismissedNextUpKey] = useState(null);
+  const [nextUpTriggerKey, setNextUpTriggerKey] = useState(null);
   const [globalSettings, setGlobalSettings] = useState(null);
+  const [markerSaveStatus, setMarkerSaveStatus] = useState(null);
   const [timelineThumbnails, setTimelineThumbnails] = useState({ status: "idle", thumbnails: [] });
   const [seekPreview, setSeekPreview] = useState(null);
   const isTranscodedPlayback = playbackInfo?.directPlay === false || playbackContext?.directPlay === false;
@@ -310,6 +319,8 @@ export default function Watch() {
 
     setSegments([]);
     setActiveSegment(null);
+    setDismissedNextUpKey(null);
+    setNextUpTriggerKey(null);
     apiFetch(`/files/${fileId}/segments`)
       .then((data) => {
         if (!cancelled && data.segments) setSegments(data.segments);
@@ -322,9 +333,7 @@ export default function Watch() {
       .then((data) => {
         if (!cancelled) {
           setGlobalSettings(data);
-          if (data.autoPlayNextEnabled === false) {
-            setAutoPlayNext(false);
-          }
+          setAutoPlayNext(data.autoPlayNextEnabled !== false);
         }
       })
       .catch(() => {});
@@ -333,6 +342,17 @@ export default function Watch() {
       cancelled = true;
     };
   }, [fileId]);
+
+  useEffect(() => {
+    function handleSettingsUpdated(event) {
+      if (event.detail) {
+        setGlobalSettings((current) => ({ ...current, ...event.detail }));
+      }
+    }
+
+    window.addEventListener("nicflix:settings-updated", handleSettingsUpdated);
+    return () => window.removeEventListener("nicflix:settings-updated", handleSettingsUpdated);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -460,8 +480,9 @@ export default function Watch() {
     function handleEnded() {
       saveProgress(true);
       if (!episodeNav.next) return;
+      setNextUpTriggerKey(null);
       setNextUp(episodeNav.next);
-      setCountdown(autoPlayNext ? 8 : null);
+      setCountdown(autoPlayNext ? NEXT_UP_COUNTDOWN_SECONDS : null);
     }
 
     timer = window.setInterval(save, 10000);
@@ -497,25 +518,96 @@ export default function Watch() {
     }
     // Find the currently active segment with a small buffer for precision
     const segment = segments.find((s) => {
-      const isOutro = ["outro", "credits"].includes(s.type);
+      const isOutro = isOutroSegment(s);
       if (isOutro) {
         // Outros should appear as soon as the segment starts and stay until the end of the file
-        return currentTime >= s.start - 1;
+        return currentTime >= s.start - (s.source === "manual" ? 0 : 1);
       }
       return currentTime >= s.start - 0.5 && currentTime < s.end - 0.2;
     });
     setActiveSegment(segment || null);
   }, [currentTime, segments]);
 
+  const activeOutroSkipKey = isOutroSegment(activeSegment)
+    ? `${fileId}:${activeSegment.type}:${Number(activeSegment.start) || 0}`
+    : null;
+  const canShowMarkerCorrection = Boolean(
+    globalSettings?.markerCorrectionEnabled
+    && globalSettings?.autoSkipEnabled
+    && playbackContext?.type === "tv"
+    && episodeNav.next
+    && (isOutroSegment(activeSegment) || (duration > 0 && currentTime >= duration * 0.75))
+  );
+  const showSegmentSkipButton = activeSegment && !(isOutroSegment(activeSegment) && episodeNav.next);
+  const nextUpProgressing = countdown !== null;
+  const markerSaving = markerSaveStatus?.state === "saving";
+
+  useEffect(() => {
+    if (!nextUpTriggerKey) return;
+    if (activeOutroSkipKey === nextUpTriggerKey) return;
+
+    setNextUp(null);
+    setCountdown(null);
+    setNextUpTriggerKey(null);
+  }, [activeOutroSkipKey, nextUpTriggerKey]);
+
+  useEffect(() => {
+    if (!activeOutroSkipKey || !episodeNav.next || dismissedNextUpKey === activeOutroSkipKey) return;
+
+    setNextUp((current) => (
+      Number(current?.file_id) === Number(episodeNav.next.file_id) ? current : episodeNav.next
+    ));
+    setNextUpTriggerKey(activeOutroSkipKey);
+    setCountdown((value) => (autoPlayNext && value === null ? NEXT_UP_COUNTDOWN_SECONDS : value));
+  }, [activeOutroSkipKey, autoPlayNext, dismissedNextUpKey, episodeNav.next]);
+
   function skipSegment() {
     if (activeSegment && videoRef.current) {
-      if (["outro", "credits"].includes(activeSegment.type) && episodeNav.next) {
-        playNext();
+      if (isOutroSegment(activeSegment) && episodeNav.next) {
+        playNext(episodeNav.next);
       } else {
-        const isOutro = ["outro", "credits"].includes(activeSegment.type);
+        const isOutro = isOutroSegment(activeSegment);
         seekTo(isOutro ? duration : activeSegment.end);
         setActiveSegment(null);
       }
+    }
+  }
+
+  function dismissNextUp() {
+    if (activeOutroSkipKey) setDismissedNextUpKey(activeOutroSkipKey);
+    setNextUp(null);
+    setCountdown(null);
+    setNextUpTriggerKey(null);
+  }
+
+  async function saveCreditsMarker() {
+    if (markerSaving) return;
+
+    const start = Math.max(0, currentTime || 0);
+    try {
+      setMarkerSaveStatus({ state: "saving", message: "Saving credits marker" });
+      const data = await apiFetch(`/files/${fileId}/segments/credits`, {
+        method: "PUT",
+        body: JSON.stringify({ start })
+      });
+      const marker = data.marker;
+      if (marker) {
+        setSegments((current) => [
+          ...current.filter((segment) => segment.type !== marker.type),
+          marker
+        ].sort((a, b) => a.start - b.start));
+        setActiveSegment(marker);
+        setDismissedNextUpKey(null);
+      }
+      setMarkerSaveStatus({ state: "saved", message: `Credits saved at ${formatTime(start)}` });
+      window.setTimeout(() => {
+        setMarkerSaveStatus((status) => (status?.state === "saved" ? null : status));
+      }, 3000);
+    } catch (error) {
+      setMarkerSaveStatus({ state: "error", message: error.message });
+      window.setTimeout(() => {
+        setMarkerSaveStatus((status) => (status?.state === "error" ? null : status));
+      }, 5000);
     }
   }
 
@@ -529,13 +621,13 @@ export default function Watch() {
   useEffect(() => {
     if (!nextUp || countdown === null) return undefined;
     if (countdown <= 0) {
-      navigate(`/watch/${nextUp.file_id}`, { replace: true });
+      saveProgress(true).finally(() => navigate(`/watch/${nextUp.file_id}`, { replace: true }));
       return undefined;
     }
 
     const timer = window.setTimeout(() => setCountdown((value) => value - 1), 1000);
     return () => window.clearTimeout(timer);
-  }, [countdown, navigate, nextUp]);
+  }, [countdown, navigate, nextUp, saveProgress]);
 
   const selectedAudioTrack = selectedAudio !== "" ? tracks.audioTracks[Number(selectedAudio)] : null;
   const streamParams = new URLSearchParams();
@@ -692,15 +784,9 @@ export default function Watch() {
     setOpenTrackMenu((current) => (current === menu ? null : menu));
   }
 
-  function toggleAutoPlayNext(event) {
-    const enabled = event.target.checked;
-    setAutoPlayNext(enabled);
-    localStorage.setItem("nicflix.autoplayNext", String(enabled));
-    if (nextUp) setCountdown(enabled ? 8 : null);
-  }
-
-  function playNext() {
-    if (nextUp) navigate(`/watch/${nextUp.file_id}`, { replace: true });
+  function playNext(file = nextUp || episodeNav.next) {
+    if (!file?.file_id) return;
+    saveProgress(true).finally(() => navigate(`/watch/${file.file_id}`, { replace: true }));
   }
 
   function playEpisode(file) {
@@ -866,7 +952,7 @@ export default function Watch() {
         </div>
       ) : null}
 
-      {activeSegment ? (
+      {showSegmentSkipButton ? (
         <button
           className={`watch-skip-button ${!controlsVisible && isPlaying ? "controls-hidden" : ""}`}
           type="button"
@@ -881,6 +967,26 @@ export default function Watch() {
                 : "Skip Outro"}
           <SkipForward size={20} fill="currentColor" />
         </button>
+      ) : null}
+
+      {nextUp ? (
+        <div className={`watch-next-up ${!controlsVisible && isPlaying ? "controls-hidden" : ""}`}>
+          <button
+            className={`watch-next-button ${nextUpProgressing ? "progressing" : ""}`}
+            type="button"
+            onClick={() => playNext()}
+            style={{ "--next-up-duration": `${NEXT_UP_COUNTDOWN_SECONDS}s` }}
+            aria-label="Play next episode"
+          >
+            <span>
+              <Play size={18} fill="currentColor" />
+              Next Episode
+            </span>
+          </button>
+          <button className="watch-next-cancel" type="button" onClick={dismissNextUp}>
+            Cancel
+          </button>
+        </div>
       ) : null}
 
       <div className="watch-controls">
@@ -942,7 +1048,20 @@ export default function Watch() {
           >
             <SkipForward size={23} fill="currentColor" />
           </button>
+          {canShowMarkerCorrection ? (
+            <button
+              className="watch-control-button"
+              type="button"
+              onClick={saveCreditsMarker}
+              disabled={markerSaving}
+              aria-label="Set credits start to current time"
+              title="Set credits start to current time"
+            >
+              <Clock3 size={22} />
+            </button>
+          ) : null}
           <span className="watch-time">{formatTime(currentTime)} / {formatTime(duration)}</span>
+          {markerSaveStatus ? <span className={`watch-marker-status ${markerSaveStatus.state}`}>{markerSaveStatus.message}</span> : null}
           <div className="watch-control-spacer" />
           <button className="watch-control-button" type="button" onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"}>
             {muted || volume === 0 ? <VolumeX size={24} /> : <Volume2 size={24} />}
@@ -1095,27 +1214,6 @@ export default function Watch() {
           </button>
         </div>
       </div>
-      {nextUp ? (
-        <div className="next-up-panel">
-          <button className="next-up-close" type="button" onClick={() => { setNextUp(null); setCountdown(null); }} aria-label="Dismiss next episode">
-            <X size={17} />
-          </button>
-          <span className="eyebrow">Next Episode</span>
-          <h2>{nextUp.episode_title || `Episode ${nextUp.episode_number}`}</h2>
-          <p>Season {nextUp.season_number}, Episode {nextUp.episode_number}</p>
-          <label className="next-up-autoplay">
-            <input type="checkbox" checked={autoPlayNext} onChange={toggleAutoPlayNext} />
-            Auto-play next episode
-          </label>
-          <div className="next-up-actions">
-            <button className="primary-button" type="button" onClick={playNext}>
-              <Play size={17} fill="currentColor" />
-              Play now
-            </button>
-            {countdown !== null ? <span>Auto-playing in {countdown}s</span> : null}
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

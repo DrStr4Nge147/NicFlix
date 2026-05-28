@@ -11,7 +11,8 @@ const defaultConfig = {
   tmdbApiKeyEncrypted: "",
   tmdbDisconnected: false,
   autoSkipEnabled: false,
-  autoPlayNextEnabled: true
+  autoPlayNextEnabled: true,
+  markerCorrectionEnabled: false
 };
 
 function readRawConfig() {
@@ -26,7 +27,8 @@ function readRawConfig() {
     tmdbApiKeyEncrypted: typeof parsed.tmdbApiKeyEncrypted === "string" ? parsed.tmdbApiKeyEncrypted : "",
     tmdbDisconnected: parsed.tmdbDisconnected === true,
     autoSkipEnabled: parsed.autoSkipEnabled === true,
-    autoPlayNextEnabled: parsed.autoPlayNextEnabled !== false
+    autoPlayNextEnabled: parsed.autoPlayNextEnabled !== false,
+    markerCorrectionEnabled: parsed.markerCorrectionEnabled === true
   };
   if (typeof parsed.tmdbApiKey === "string") {
     config.tmdbApiKey = parsed.tmdbApiKey;
@@ -75,7 +77,8 @@ export function readAppConfig() {
     tmdbApiKeyEncrypted: config.tmdbApiKeyEncrypted,
     tmdbDisconnected: config.tmdbDisconnected,
     autoSkipEnabled: config.autoSkipEnabled,
-    autoPlayNextEnabled: config.autoPlayNextEnabled
+    autoPlayNextEnabled: config.autoPlayNextEnabled,
+    markerCorrectionEnabled: config.markerCorrectionEnabled
   };
 }
 
