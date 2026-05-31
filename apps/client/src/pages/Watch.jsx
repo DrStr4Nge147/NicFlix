@@ -155,11 +155,13 @@ export default function Watch() {
   }, [muted, volume]);
 
   const saveProgress = useCallback((watched = false, options = {}) => {
-    const video = videoRef.current;
+    const video = options.video || videoRef.current;
+    if (!video || video.dataset.fileId !== String(fileId)) return Promise.resolve();
+
     const mediaDuration = isTranscodedPlayback
       ? fileDuration
       : reliableDuration(video, fileDuration);
-    if (!video || !mediaDuration) return Promise.resolve();
+    if (!mediaDuration) return Promise.resolve();
 
     const rawPosition = isTranscodedPlayback ? streamOffset + (video.currentTime || 0) : (video.currentTime || 0);
     const position = Math.min(mediaDuration, Math.max(0, rawPosition));
@@ -425,6 +427,9 @@ export default function Watch() {
     apiFetch(`/progress/${fileId}`).then(({ progress }) => {
       if (cancelled) return;
       const restoredPosition = Number(progress?.position || 0);
+      const restoredDuration = Number(progress?.duration || fileDuration || 0);
+      const isWatched = progress?.watched === 1 || progress?.watched === true;
+      if (isWatched || (restoredDuration > 0 && restoredPosition >= restoredDuration - 1)) return;
       if (video && restoredPosition > 0) {
         if (isTranscodedPlayback) {
           resumeAfterSourceChangeRef.current = { time: 0, wasPlaying: true };
@@ -450,11 +455,11 @@ export default function Watch() {
     const video = videoRef.current;
 
     function save() {
-      saveProgress();
+      saveProgress(false, { video });
     }
 
     function saveForUnload() {
-      saveProgress(false, { keepalive: true });
+      saveProgress(false, { keepalive: true, video });
     }
 
     function syncPlaybackState() {
@@ -478,7 +483,7 @@ export default function Watch() {
     }
 
     function handleEnded() {
-      saveProgress(true);
+      saveProgress(true, { video });
       if (!episodeNav.next) return;
       setNextUpTriggerKey(null);
       setNextUp(episodeNav.next);
@@ -925,7 +930,16 @@ export default function Watch() {
       ) : null}
 
       {hasPlaybackMetadata ? (
-        <video ref={bindVideoRef} src={streamSrc} autoPlay playsInline onClick={showControls} onDoubleClick={togglePlayback}>
+        <video
+          key={fileId}
+          ref={bindVideoRef}
+          data-file-id={fileId}
+          src={streamSrc}
+          autoPlay
+          playsInline
+          onClick={showControls}
+          onDoubleClick={togglePlayback}
+        >
           {tracks.subtitleTracks.map((track, index) => (
             <track
               key={`${track.src}-${subtitleOffset.toFixed(2)}-${index}`}
